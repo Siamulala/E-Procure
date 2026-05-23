@@ -1,0 +1,48 @@
+/* Pages.css - Shared styling for all page components */
+.page-container {
+    min-height: calc(100vh - 80px);
+}
+
+.page-header {
+    margin-bottom: 40px;
+}
+
+.page-header h1 {
+    font-size: 32px;
+    color: #1e3c72;
+    margin-bottom: 10px;
+    font-weight: 700;
+}
+
+.page-header p {
+    font-size: 16px;
+    color: #64748b;
+    line-height: 1.6;
+}
+
+/* Card styling for future content */
+.card {
+    background: white;
+    border-radius: 8px;
+    padding: 20px;
+    margin-bottom: 20px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.06);
+    transition: box-shadow 0.3s ease;
+}
+
+.card:hover {
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.card-title {
+    font-size: 18px;
+    color: #1e3c72;
+    margin-bottom: 10px;
+    font-weight: 600;
+}
+
+.card-content {
+    color: #64748b;
+    font-size: 14px;
+    line-height: 1.6;
+}
