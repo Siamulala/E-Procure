@@ -15,6 +15,8 @@ export default function Settings({ user, setUser }) {
   const [rolePermissions, setRolePermissions] = useState({});
   const [userRoleAssignment, setUserRoleAssignment] = useState({});
   const [newUserForm, setNewUserForm] = useState({ name: "", email: "", role: "Staff", password: "" });
+  const [editingUserEmail, setEditingUserEmail] = useState(null);
+  const [editingUserForm, setEditingUserForm] = useState({ name: "", email: "", role: "Staff" });
 
   const availablePermissions = useMemo(() => [
     "view_dashboard",
@@ -147,6 +149,61 @@ export default function Settings({ user, setUser }) {
     localStorage.setItem("users", JSON.stringify(updatedUsers));
     setNewUserForm({ name: "", email: "", role: "Staff", password: "" });
     alert("User added successfully!");
+  };
+
+  const handleEditUser = (userEmail) => {
+    const userToEdit = users.find(u => u.email === userEmail);
+    if (userToEdit) {
+      setEditingUserEmail(userEmail);
+      setEditingUserForm({ name: userToEdit.name, email: userToEdit.email, role: userToEdit.role });
+    }
+  };
+
+  const handleSaveEditUser = () => {
+    if (!editingUserForm.name || !editingUserForm.email) {
+      alert("Name and email required");
+      return;
+    }
+    // Check if new email already exists (but allow same email)
+    if (editingUserForm.email !== editingUserEmail && users.find(u => u.email === editingUserForm.email)) {
+      alert("Email already in use");
+      return;
+    }
+    const updatedUsers = users.map(u =>
+      u.email === editingUserEmail
+        ? { ...u, name: editingUserForm.name, email: editingUserForm.email, role: editingUserForm.role }
+        : u
+    );
+    setUsers(updatedUsers);
+    localStorage.setItem("users", JSON.stringify(updatedUsers));
+    setEditingUserEmail(null);
+    setEditingUserForm({ name: "", email: "", role: "Staff" });
+    alert("User updated successfully!");
+  };
+
+  const handleDeleteUser = (userEmail) => {
+    if (userEmail === user?.email) {
+      alert("Cannot delete your own account");
+      return;
+    }
+    if (window.confirm("Are you sure you want to delete this user?")) {
+      const updatedUsers = users.filter(u => u.email !== userEmail);
+      setUsers(updatedUsers);
+      localStorage.setItem("users", JSON.stringify(updatedUsers));
+      if (editingUserEmail === userEmail) {
+        setEditingUserEmail(null);
+      }
+    }
+  };
+
+  const handleResetUserPassword = (userEmail) => {
+    const tempPassword = "TempPass" + Math.random().toString(36).slice(-6);
+    const updatedUsers = users.map(u =>
+      u.email === userEmail ? { ...u, password: tempPassword } : u
+    );
+    setUsers(updatedUsers);
+    localStorage.setItem("users", JSON.stringify(updatedUsers));
+    alert(`Password reset to: ${tempPassword}`);
   };
 
   const isAdmin = user?.role === "Admin";
@@ -320,42 +377,119 @@ export default function Settings({ user, setUser }) {
             </div>
           </div>
 
-          {/* Assign Users to Roles */}
+          {/* Manage Users */}
           <div style={{ marginBottom: "30px", padding: "20px", background: "#f9f9f9", borderRadius: "8px" }}>
-            <h3>Assign Users to Roles</h3>
-            <table border="1" cellPadding="10" style={{ width: "100%", borderCollapse: "collapse" }}>
+            <h3>Manage Users</h3>
+            <table border="1" cellPadding="10" style={{ width: "100%", borderCollapse: "collapse", marginBottom: "20px" }}>
               <thead style={{ backgroundColor: "#f0f0f0" }}>
                 <tr>
-                  <th>User Name</th>
+                  <th>Name</th>
                   <th>Email</th>
-                  <th>Current Role</th>
-                  <th>Assign Role</th>
+                  <th>Role</th>
+                  <th>Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {users.map((u) => (
-                  <tr key={u.email}>
+                  <tr key={u.email} style={{ backgroundColor: editingUserEmail === u.email ? "#e3f2fd" : "#fff" }}>
                     <td>{u.name}</td>
                     <td>{u.email}</td>
                     <td>{u.role || "Not assigned"}</td>
-                    <td>
-                      <select
-                        value={u.role || ""}
-                        onChange={(e) => handleAssignUserRole(u.email, e.target.value)}
-                        style={{ padding: "5px", borderRadius: "5px", border: "1px solid #ddd" }}
+                    <td style={{ display: "flex", gap: "6px" }}>
+                      <button
+                        onClick={() => handleEditUser(u.email)}
+                        style={{
+                          padding: "6px 12px",
+                          backgroundColor: editingUserEmail === u.email ? "#2196F3" : "#0066cc",
+                          color: "#fff",
+                          border: "none",
+                          borderRadius: "5px",
+                          cursor: "pointer",
+                          fontSize: "12px"
+                        }}
                       >
-                        <option value="">-- Select Role --</option>
-                        {roles.map((role) => (
-                          <option key={role} value={role}>
-                            {role}
-                          </option>
-                        ))}
-                      </select>
+                        {editingUserEmail === u.email ? "Editing..." : "Edit"}
+                      </button>
+                      <button
+                        onClick={() => handleResetUserPassword(u.email)}
+                        style={{ padding: "6px 12px", backgroundColor: "#FF9800", color: "#fff", border: "none", borderRadius: "5px", cursor: "pointer", fontSize: "12px" }}
+                      >
+                        Reset Pass
+                      </button>
+                      {u.email !== user?.email && (
+                        <button
+                          onClick={() => handleDeleteUser(u.email)}
+                          style={{ padding: "6px 12px", backgroundColor: "#f44336", color: "#fff", border: "none", borderRadius: "5px", cursor: "pointer", fontSize: "12px" }}
+                        >
+                          Delete
+                        </button>
+                      )}
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
+
+            {editingUserEmail && (
+              <div style={{ padding: "20px", background: "#fff", borderRadius: "8px", border: "2px solid #2196F3", marginBottom: "20px" }}>
+                <h4>Edit User: {editingUserEmail}</h4>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "12px" }}>
+                  <input
+                    type="text"
+                    placeholder="Full Name"
+                    value={editingUserForm.name}
+                    onChange={(e) => setEditingUserForm({ ...editingUserForm, name: e.target.value })}
+                    style={{ padding: "10px", border: "1px solid #ddd", borderRadius: "5px" }}
+                  />
+                  <input
+                    type="email"
+                    placeholder="Email Address"
+                    value={editingUserForm.email}
+                    onChange={(e) => setEditingUserForm({ ...editingUserForm, email: e.target.value })}
+                    style={{ padding: "10px", border: "1px solid #ddd", borderRadius: "5px" }}
+                  />
+                  <select
+                    value={editingUserForm.role}
+                    onChange={(e) => setEditingUserForm({ ...editingUserForm, role: e.target.value })}
+                    style={{ padding: "10px", border: "1px solid #ddd", borderRadius: "5px" }}
+                  >
+                    {roles.map(r => <option key={r} value={r}>{r}</option>)}
+                  </select>
+                </div>
+                <div style={{ display: "flex", gap: "10px", marginTop: "12px" }}>
+                  <button
+                    onClick={handleSaveEditUser}
+                    style={{
+                      padding: "10px 20px",
+                      backgroundColor: "#4CAF50",
+                      color: "#fff",
+                      border: "none",
+                      borderRadius: "5px",
+                      fontWeight: 700,
+                      cursor: "pointer"
+                    }}
+                  >
+                    Save Changes
+                  </button>
+                  <button
+                    onClick={() => {
+                      setEditingUserEmail(null);
+                      setEditingUserForm({ name: "", email: "", role: "Staff" });
+                    }}
+                    style={{
+                      padding: "10px 20px",
+                      backgroundColor: "#999",
+                      color: "#fff",
+                      border: "none",
+                      borderRadius: "5px",
+                      cursor: "pointer"
+                    }}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </>
       )}
