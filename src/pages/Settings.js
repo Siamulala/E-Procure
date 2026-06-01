@@ -1,8 +1,61 @@
 // src/pages/Settings.js
-import React, { useState } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 
 export default function Settings({ user, setUser }) {
-  const [profile, setProfile] = useState(user);
+  const [profile, setProfile] = useState({
+    name: user?.name || "",
+    role: user?.role || "",
+    profilePic: user?.profilePic || ""
+  });
+
+  const [roles, setRoles] = useState([]);
+  const [users, setUsers] = useState([]);
+  const [newRole, setNewRole] = useState("");
+  const [selectedRoleForEdit, setSelectedRoleForEdit] = useState(null);
+  const [rolePermissions, setRolePermissions] = useState({});
+  const [userRoleAssignment, setUserRoleAssignment] = useState({});
+  const [newUserForm, setNewUserForm] = useState({ name: "", email: "", role: "Staff", password: "" });
+
+  const availablePermissions = useMemo(() => [
+    "view_dashboard",
+    "view_inventory",
+    "edit_inventory",
+    "delete_inventory",
+    "view_orders",
+    "edit_orders",
+    "view_purchase",
+    "approve_purchase",
+    "view_reporting",
+    "manage_users",
+    "manage_roles"
+  ], []);
+
+  useEffect(() => {
+    // Load roles and permissions from localStorage
+    const storedRoles = JSON.parse(localStorage.getItem("roles") || "[]");
+    const storedUsers = JSON.parse(localStorage.getItem("users") || "[]");
+    const storedPermissions = JSON.parse(localStorage.getItem("rolePermissions") || "{}");
+    const storedAssignments = JSON.parse(localStorage.getItem("userRoleAssignment") || "{}");
+
+    if (storedRoles.length === 0) {
+      const defaultRoles = ["Admin", "Director", "Manager", "Staff"];
+      const defaultPermissions = {
+        Admin: availablePermissions,
+        Director: ["view_dashboard", "view_inventory", "view_orders", "approve_purchase", "view_purchase", "view_reporting"],
+        Manager: ["view_dashboard", "view_inventory", "edit_inventory", "view_orders", "view_purchase"],
+        Staff: ["view_dashboard", "view_inventory"]
+      };
+      localStorage.setItem("roles", JSON.stringify(defaultRoles));
+      localStorage.setItem("rolePermissions", JSON.stringify(defaultPermissions));
+      setRoles(defaultRoles);
+      setRolePermissions(defaultPermissions);
+    } else {
+      setRoles(storedRoles);
+      setRolePermissions(storedPermissions);
+      setUserRoleAssignment(storedAssignments);
+    }
+    setUsers(storedUsers);
+  }, [availablePermissions]);
 
   const handleProfileChange = (e) => {
     const { name, value } = e.target;
@@ -19,14 +72,92 @@ export default function Settings({ user, setUser }) {
 
   const handleSave = (e) => {
     e.preventDefault();
-    setUser(profile); // ✅ updates global state
+    setUser(profile);
     alert("Profile updated successfully!");
   };
+
+  const handleAddRole = () => {
+    if (!newRole.trim()) {
+      alert("Please enter a role name");
+      return;
+    }
+    if (roles.includes(newRole)) {
+      alert("Role already exists");
+      return;
+    }
+    const updatedRoles = [...roles, newRole];
+    setRoles(updatedRoles);
+    const updatedPermissions = { ...rolePermissions, [newRole]: [] };
+    setRolePermissions(updatedPermissions);
+    localStorage.setItem("roles", JSON.stringify(updatedRoles));
+    localStorage.setItem("rolePermissions", JSON.stringify(updatedPermissions));
+    setNewRole("");
+  };
+
+  const handlePermissionToggle = (permission) => {
+    if (!selectedRoleForEdit) return;
+    const perms = rolePermissions[selectedRoleForEdit] || [];
+    const updated = perms.includes(permission)
+      ? perms.filter(p => p !== permission)
+      : [...perms, permission];
+    const updatedPermissions = { ...rolePermissions, [selectedRoleForEdit]: updated };
+    setRolePermissions(updatedPermissions);
+    localStorage.setItem("rolePermissions", JSON.stringify(updatedPermissions));
+  };
+
+  const handleDeleteRole = (roleName) => {
+    if (["Admin", "Director"].includes(roleName)) {
+      alert("Cannot delete system roles");
+      return;
+    }
+    if (window.confirm(`Delete role "${roleName}"?`)) {
+      const updatedRoles = roles.filter(r => r !== roleName);
+      const updatedPermissions = { ...rolePermissions };
+      delete updatedPermissions[roleName];
+      setRoles(updatedRoles);
+      setRolePermissions(updatedPermissions);
+      localStorage.setItem("roles", JSON.stringify(updatedRoles));
+      localStorage.setItem("rolePermissions", JSON.stringify(updatedPermissions));
+      setSelectedRoleForEdit(null);
+    }
+  };
+
+  const handleAssignUserRole = (userEmail, newRole) => {
+    const updated = { ...userRoleAssignment, [userEmail]: newRole };
+    setUserRoleAssignment(updated);
+    localStorage.setItem("userRoleAssignment", JSON.stringify(updated));
+    // Update the user in the users list as well
+    const updatedUsers = users.map(u => u.email === userEmail ? { ...u, role: newRole } : u);
+    localStorage.setItem("users", JSON.stringify(updatedUsers));
+  };
+
+  const handleAddNewUser = (e) => {
+    e.preventDefault();
+    if (!newUserForm.email || !newUserForm.name) {
+      alert("Name and email required");
+      return;
+    }
+    if (users.find((u) => u.email === newUserForm.email)) {
+      alert("User already exists");
+      return;
+    }
+    const newUser = { ...newUserForm, password: newUserForm.password || "tempPassword123" };
+    const updatedUsers = [...users, newUser];
+    setUsers(updatedUsers);
+    localStorage.setItem("users", JSON.stringify(updatedUsers));
+    setNewUserForm({ name: "", email: "", role: "Staff", password: "" });
+    alert("User added successfully!");
+  };
+
+  const isAdmin = user?.role === "Admin";
 
   return (
     <div style={{ background: "#fff", padding: "30px", borderRadius: "12px", boxShadow: "0 4px 16px rgba(0,0,0,0.05)" }}>
       <h1>Settings</h1>
-      <form onSubmit={handleSave} style={{ marginTop: "20px" }}>
+      <h2>{user?.name || "Guest"}</h2>
+
+      {/* Profile Section */}
+      <form onSubmit={handleSave} style={{ marginTop: "20px", marginBottom: "40px", paddingBottom: "20px", borderBottom: "1px solid #ddd" }}>
         <h2>Profile Information</h2>
         <label>
           Name:
@@ -47,6 +178,7 @@ export default function Settings({ user, setUser }) {
             value={profile.role}
             onChange={handleProfileChange}
             style={{ marginLeft: "10px" }}
+            disabled
           />
         </label>
         <br />
@@ -68,10 +200,165 @@ export default function Settings({ user, setUser }) {
           />
         )}
         <br />
-        <button type="submit" style={{ marginTop: "10px" }}>
+        <button type="submit" style={{ marginTop: "10px", padding: "10px 20px", backgroundColor: "#4CAF50", color: "#fff", border: "none", borderRadius: "5px" }}>
           Save Profile
         </button>
       </form>
+
+      {/* Admin Only: Role Management Section */}
+      {isAdmin && (
+        <>
+          <h2>Role Management (Admin Only)</h2>
+
+          {/* Create New Role */}
+          <div style={{ marginBottom: "30px", padding: "20px", background: "#f9f9f9", borderRadius: "8px" }}>
+            <h3>Create New Role</h3>
+            <div style={{ display: "flex", gap: "10px", marginBottom: "15px" }}>
+              <input
+                type="text"
+                placeholder="Role name (e.g., Supervisor)"
+                value={newRole}
+                onChange={(e) => setNewRole(e.target.value)}
+                style={{ padding: "8px", flex: 1, borderRadius: "5px", border: "1px solid #ddd" }}
+              />
+              <button onClick={handleAddRole} style={{ padding: "8px 20px", backgroundColor: "#4CAF50", color: "#fff", border: "none", borderRadius: "5px" }}>
+                Add Role
+              </button>
+            </div>
+          </div>
+
+          {/* Add New User */}
+          <div style={{ marginBottom: "30px", padding: "20px", background: "#f9f9f9", borderRadius: "8px" }}>
+            <h3>Add New User</h3>
+            <form onSubmit={handleAddNewUser} style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "12px" }}>
+              <input
+                type="text"
+                placeholder="Full Name"
+                value={newUserForm.name}
+                onChange={(e) => setNewUserForm({ ...newUserForm, name: e.target.value })}
+                style={{ padding: "10px", border: "1px solid #ddd", borderRadius: "5px" }}
+              />
+              <input
+                type="email"
+                placeholder="Email Address"
+                value={newUserForm.email}
+                onChange={(e) => setNewUserForm({ ...newUserForm, email: e.target.value })}
+                style={{ padding: "10px", border: "1px solid #ddd", borderRadius: "5px" }}
+              />
+              <select
+                value={newUserForm.role}
+                onChange={(e) => setNewUserForm({ ...newUserForm, role: e.target.value })}
+                style={{ padding: "10px", border: "1px solid #ddd", borderRadius: "5px" }}
+              >
+                {roles.map(r => <option key={r} value={r}>{r}</option>)}
+              </select>
+              <input
+                type="text"
+                placeholder="Password (optional)"
+                value={newUserForm.password}
+                onChange={(e) => setNewUserForm({ ...newUserForm, password: e.target.value })}
+                style={{ padding: "10px", border: "1px solid #ddd", borderRadius: "5px" }}
+              />
+              <button type="submit" style={{ gridColumn: "span 1", padding: "12px", backgroundColor: "#1d4ed8", color: "#fff", border: "none", borderRadius: "5px", fontWeight: 700, cursor: "pointer" }}>
+                Add User
+              </button>
+            </form>
+          </div>
+
+          {/* Manage Roles & Permissions */}
+          <div style={{ marginBottom: "30px", padding: "20px", background: "#f9f9f9", borderRadius: "8px" }}>
+            <h3>Manage Roles & Permissions</h3>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr", gap: "20px" }}>
+              <div>
+                <h4>Roles</h4>
+                <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                  {roles.map((role) => (
+                    <div key={role} style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                      <button
+                        onClick={() => setSelectedRoleForEdit(selectedRoleForEdit === role ? null : role)}
+                        style={{
+                          flex: 1,
+                          padding: "10px",
+                          backgroundColor: selectedRoleForEdit === role ? "#2196F3" : "#e0e0e0",
+                          color: selectedRoleForEdit === role ? "#fff" : "#000",
+                          border: "none",
+                          borderRadius: "5px",
+                          cursor: "pointer"
+                        }}
+                      >
+                        {role}
+                      </button>
+                      {!["Admin", "Director"].includes(role) && (
+                        <button
+                          onClick={() => handleDeleteRole(role)}
+                          style={{ padding: "8px 12px", backgroundColor: "#f44336", color: "#fff", border: "none", borderRadius: "5px" }}
+                        >
+                          ✕
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <h4>Permissions for {selectedRoleForEdit || "Select a role"}</h4>
+                {selectedRoleForEdit && (
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
+                    {availablePermissions.map((perm) => (
+                      <label key={perm} style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                        <input
+                          type="checkbox"
+                          checked={(rolePermissions[selectedRoleForEdit] || []).includes(perm)}
+                          onChange={() => handlePermissionToggle(perm)}
+                        />
+                        {perm.replace(/_/g, " ")}
+                      </label>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Assign Users to Roles */}
+          <div style={{ marginBottom: "30px", padding: "20px", background: "#f9f9f9", borderRadius: "8px" }}>
+            <h3>Assign Users to Roles</h3>
+            <table border="1" cellPadding="10" style={{ width: "100%", borderCollapse: "collapse" }}>
+              <thead style={{ backgroundColor: "#f0f0f0" }}>
+                <tr>
+                  <th>User Name</th>
+                  <th>Email</th>
+                  <th>Current Role</th>
+                  <th>Assign Role</th>
+                </tr>
+              </thead>
+              <tbody>
+                {users.map((u) => (
+                  <tr key={u.email}>
+                    <td>{u.name}</td>
+                    <td>{u.email}</td>
+                    <td>{u.role || "Not assigned"}</td>
+                    <td>
+                      <select
+                        value={u.role || ""}
+                        onChange={(e) => handleAssignUserRole(u.email, e.target.value)}
+                        style={{ padding: "5px", borderRadius: "5px", border: "1px solid #ddd" }}
+                      >
+                        <option value="">-- Select Role --</option>
+                        {roles.map((role) => (
+                          <option key={role} value={role}>
+                            {role}
+                          </option>
+                        ))}
+                      </select>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
     </div>
   );
 }
