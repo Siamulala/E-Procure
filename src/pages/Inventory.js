@@ -3,13 +3,13 @@ import React, { useState } from "react";
 
 export default function Inventory({ inventory, setInventory, user }) {
   const [newItem, setNewItem] = useState({
+    date: "",
     item: "",
     description: "",
     quantity: "",
     uom: "",
     amount: "",
-    supplier: "",
-    date: ""
+    supplier: ""
   });
 
   const [selectedItems, setSelectedItems] = useState(new Set());
@@ -44,13 +44,14 @@ export default function Inventory({ inventory, setInventory, user }) {
 
     // Reset form
     setNewItem({
+      date: "",
       item: "",
       description: "",
       quantity: "",
       uom: "",
-      amount: "",
-      supplier: "",
-      date: ""
+      unitprice: "",
+      Totalamount: "",
+      supplier: ""
     });
   };
 
@@ -127,13 +128,13 @@ export default function Inventory({ inventory, setInventory, user }) {
 
       {/* Add Item Form */}
       <form onSubmit={handleAddItem} style={{ marginBottom: "20px", display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "10px" }}>
+         <input type="date" name="date" value={newItem.date} onChange={handleChange} />
         <input type="text" name="item" placeholder="Item" value={newItem.item} onChange={handleChange} />
         <input type="text" name="description" placeholder="Description" value={newItem.description} onChange={handleChange} />
         <input type="number" name="quantity" placeholder="Quantity" value={newItem.quantity} onChange={handleChange} />
         <input type="text" name="uom" placeholder="UOM" value={newItem.uom} onChange={handleChange} />
         <input type="number" name="amount" placeholder="Amount" value={newItem.amount} onChange={handleChange} />
         <input type="text" name="supplier" placeholder="Supplier" value={newItem.supplier} onChange={handleChange} />
-        <input type="date" name="date" value={newItem.date} onChange={handleChange} />
         <button type="submit" style={{ gridColumn: "span 2", padding: "10px", backgroundColor: "#36A2EB", color: "#fff", border: "none", borderRadius: "5px" }}>
           Add Item
         </button>
@@ -145,22 +146,22 @@ export default function Inventory({ inventory, setInventory, user }) {
           <span style={{ fontWeight: 700 }}>{selectedItems.size} item(s) selected</span>
           {editingIndex === null ? (
             <>
-              <button onClick={() => startEdit(Array.from(selectedItems)[0])} style={{ padding: "8px 16px", backgroundColor: "#4CAF50", color: "#fff", border: "none", borderRadius: "5px" }}>
+              <button onClick={() => startEdit(Array.from(selectedItems)[0])} style={{ padding: "8px 16px", backgroundColor: "#f0f7ff", color: "rgba(7, 5, 5, 0)", border: "none", borderRadius: "5px" }}>
                 Edit
               </button>
-              <button onClick={exportSelected} style={{ padding: "8px 16px", backgroundColor: "#2196F3", color: "#fff", border: "none", borderRadius: "5px" }}>
+              <button onClick={exportSelected} style={{ padding: "8px 16px", backgroundColor: "#f0f7ff", color: "#fff", border: "none", borderRadius: "5px" }}>
                 Export
               </button>
-              <button onClick={printInventory} style={{ padding: "8px 16px", backgroundColor: "#16a34a", color: "#fff", border: "none", borderRadius: "5px" }}>
+              <button onClick={printInventory} style={{ padding: "8px 16px", backgroundColor: "#f0f7ff", color: "#fff", border: "none", borderRadius: "5px" }}>
                 📄 Print
               </button>
-              <button onClick={deleteSelected} style={{ padding: "8px 16px", backgroundColor: "#f44336", color: "#fff", border: "none", borderRadius: "5px" }}>
+              <button onClick={deleteSelected} style={{ padding: "8px 16px", backgroundColor: "#f0f7ff", color: "#fff", border: "none", borderRadius: "5px" }}>
                 Delete
               </button>
             </>
           ) : (
             <>
-              <button onClick={() => saveEdit(Array.from(selectedItems)[0])} style={{ padding: "8px 16px", backgroundColor: "#4CAF50", color: "#fff", border: "none", borderRadius: "5px" }}>
+              <button onClick={() => saveEdit(Array.from(selectedItems)[0])} style={{ padding: "8px 16px", backgroundColor: "#f0f7ff", color: "#fff", border: "none", borderRadius: "5px" }}>
                 Save
               </button>
               <button onClick={() => setEditingIndex(null)} style={{ padding: "8px 16px", backgroundColor: "#999", color: "#fff", border: "none", borderRadius: "5px" }}>
@@ -179,6 +180,7 @@ export default function Inventory({ inventory, setInventory, user }) {
               <input type="checkbox" checked={selectedItems.size === inventory.length && inventory.length > 0} onChange={toggleSelectAll} />
             </th>
             <th>No.</th>
+            <th>Date</th>
             <th>Item</th>
             <th>Description</th>
             <th>Quantity</th>
@@ -186,7 +188,6 @@ export default function Inventory({ inventory, setInventory, user }) {
             <th>Amount</th>
             <th>Total</th>
             <th>Supplier</th>
-            <th>Date</th>
           </tr>
         </thead>
         <tbody>
@@ -196,6 +197,7 @@ export default function Inventory({ inventory, setInventory, user }) {
                 <input type="checkbox" checked={selectedItems.has(i)} onChange={() => toggleSelectItem(i)} />
               </td>
               <td>{i + 1}</td>
+               <td>{editingIndex === i ? <input type="date" value={editValues.date || ""} onChange={(e) => setEditValues({ ...editValues, date: e.target.value })} /> : s.date}</td>
               <td>{editingIndex === i ? <input value={editValues.item || ""} onChange={(e) => setEditValues({ ...editValues, item: e.target.value })} /> : s.item}</td>
               <td>{editingIndex === i ? <input value={editValues.description || ""} onChange={(e) => setEditValues({ ...editValues, description: e.target.value })} /> : s.description}</td>
               <td>{editingIndex === i ? <input value={editValues.quantity || ""} onChange={(e) => setEditValues({ ...editValues, quantity: e.target.value })} /> : s.quantity}</td>
@@ -203,7 +205,6 @@ export default function Inventory({ inventory, setInventory, user }) {
               <td>{editingIndex === i ? <input value={editValues.amount || ""} onChange={(e) => setEditValues({ ...editValues, amount: e.target.value })} /> : (parseFloat(s.amount) || 0).toFixed(2)}</td>
               <td>{editingIndex === i ? ((parseFloat(editValues.quantity) || 0) * (parseFloat(editValues.amount) || 0)).toFixed(2) : ((parseFloat(s.quantity) || 0) * (parseFloat(s.amount) || 0)).toFixed(2)}</td>
               <td>{editingIndex === i ? <input value={editValues.supplier || ""} onChange={(e) => setEditValues({ ...editValues, supplier: e.target.value })} /> : s.supplier}</td>
-              <td>{editingIndex === i ? <input type="date" value={editValues.date || ""} onChange={(e) => setEditValues({ ...editValues, date: e.target.value })} /> : s.date}</td>
             </tr>
           ))}
         </tbody>

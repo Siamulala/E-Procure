@@ -17,6 +17,7 @@ export default function Settings({ user, setUser }) {
   const [newUserForm, setNewUserForm] = useState({ name: "", email: "", role: "Staff", password: "" });
   const [editingUserEmail, setEditingUserEmail] = useState(null);
   const [editingUserForm, setEditingUserForm] = useState({ name: "", email: "", role: "Staff" });
+  const [selectedUserEmail, setSelectedUserEmail] = useState(null);
 
   const availablePermissions = useMemo(() => [
     "view_dashboard",
@@ -154,9 +155,14 @@ export default function Settings({ user, setUser }) {
   const handleEditUser = (userEmail) => {
     const userToEdit = users.find(u => u.email === userEmail);
     if (userToEdit) {
+      setSelectedUserEmail(userEmail);
       setEditingUserEmail(userEmail);
       setEditingUserForm({ name: userToEdit.name, email: userToEdit.email, role: userToEdit.role });
     }
+  };
+
+  const selectUser = (userEmail) => {
+    setSelectedUserEmail((current) => (current === userEmail ? null : userEmail));
   };
 
   const handleSaveEditUser = () => {
@@ -192,6 +198,9 @@ export default function Settings({ user, setUser }) {
       localStorage.setItem("users", JSON.stringify(updatedUsers));
       if (editingUserEmail === userEmail) {
         setEditingUserEmail(null);
+      }
+      if (selectedUserEmail === userEmail) {
+        setSelectedUserEmail(null);
       }
     }
   };
@@ -383,52 +392,87 @@ export default function Settings({ user, setUser }) {
             <table border="1" cellPadding="10" style={{ width: "100%", borderCollapse: "collapse", marginBottom: "20px" }}>
               <thead style={{ backgroundColor: "#f0f0f0" }}>
                 <tr>
+                  <th style={{ width: "90px" }}>Select</th>
                   <th>Name</th>
                   <th>Email</th>
                   <th>Role</th>
-                  <th>Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {users.map((u) => (
-                  <tr key={u.email} style={{ backgroundColor: editingUserEmail === u.email ? "#e3f2fd" : "#fff" }}>
-                    <td>{u.name}</td>
-                    <td>{u.email}</td>
-                    <td>{u.role || "Not assigned"}</td>
-                    <td style={{ display: "flex", gap: "6px" }}>
+                  <tr
+                    key={u.email}
+                    onClick={() => selectUser(u.email)}
+                    style={{
+                      backgroundColor: selectedUserEmail === u.email ? "#e3f2fd" : "#fff",
+                      cursor: "pointer"
+                    }}
+                  >
+                    <td style={{ textAlign: "center" }}>
                       <button
-                        onClick={() => handleEditUser(u.email)}
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          selectUser(u.email);
+                        }}
                         style={{
                           padding: "6px 12px",
-                          backgroundColor: editingUserEmail === u.email ? "#2196F3" : "#0066cc",
-                          color: "#fff",
+                          backgroundColor: selectedUserEmail === u.email ? "#1d4ed8" : "#e0e0e0",
+                          color: selectedUserEmail === u.email ? "#fff" : "#000",
                           border: "none",
                           borderRadius: "5px",
                           cursor: "pointer",
                           fontSize: "12px"
                         }}
                       >
-                        {editingUserEmail === u.email ? "Editing..." : "Edit"}
+                        {selectedUserEmail === u.email ? "Selected" : "Select"}
                       </button>
-                      <button
-                        onClick={() => handleResetUserPassword(u.email)}
-                        style={{ padding: "6px 12px", backgroundColor: "#FF9800", color: "#fff", border: "none", borderRadius: "5px", cursor: "pointer", fontSize: "12px" }}
-                      >
-                        Reset Pass
-                      </button>
-                      {u.email !== user?.email && (
-                        <button
-                          onClick={() => handleDeleteUser(u.email)}
-                          style={{ padding: "6px 12px", backgroundColor: "#f44336", color: "#fff", border: "none", borderRadius: "5px", cursor: "pointer", fontSize: "12px" }}
-                        >
-                          Delete
-                        </button>
-                      )}
                     </td>
+                    <td>{u.name}</td>
+                    <td>{u.email}</td>
+                    <td>{u.role || "Not assigned"}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
+
+            {selectedUserEmail && (
+              <div style={{ marginTop: "20px", padding: "20px", background: "#fff", borderRadius: "8px", border: "1px solid #ddd" }}>
+                <h4>Selected User Actions</h4>
+                <p style={{ margin: "8px 0 16px" }}>
+                  Selected user: <strong>{users.find((u) => u.email === selectedUserEmail)?.name}</strong> ({users.find((u) => u.email === selectedUserEmail)?.role})
+                </p>
+                <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
+                  <button
+                    onClick={() => handleEditUser(selectedUserEmail)}
+                    style={{ padding: "10px 18px", backgroundColor: "#0066cc", color: "#fff", border: "none", borderRadius: "5px", cursor: "pointer" }}
+                  >
+                    Edit
+                  </button>
+                  <button
+                    onClick={() => handleResetUserPassword(selectedUserEmail)}
+                    style={{ padding: "10px 18px", backgroundColor: "#FF9800", color: "#fff", border: "none", borderRadius: "5px", cursor: "pointer" }}
+                  >
+                    Reset Password
+                  </button>
+                  {selectedUserEmail !== user?.email ? (
+                    <button
+                      onClick={() => handleDeleteUser(selectedUserEmail)}
+                      style={{ padding: "10px 18px", backgroundColor: "#f44336", color: "#fff", border: "none", borderRadius: "5px", cursor: "pointer" }}
+                    >
+                      Delete
+                    </button>
+                  ) : (
+                    <button
+                      disabled
+                      style={{ padding: "10px 18px", backgroundColor: "#ccc", color: "#666", border: "none", borderRadius: "5px" }}
+                    >
+                      Cannot delete self
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
 
             {editingUserEmail && (
               <div style={{ padding: "20px", background: "#fff", borderRadius: "8px", border: "2px solid #2196F3", marginBottom: "20px" }}>
