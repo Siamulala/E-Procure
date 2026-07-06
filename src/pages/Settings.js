@@ -13,7 +13,6 @@ export default function Settings({ user, setUser }) {
   const [newRole, setNewRole] = useState("");
   const [selectedRoleForEdit, setSelectedRoleForEdit] = useState(null);
   const [rolePermissions, setRolePermissions] = useState({});
-  const [userRoleAssignment, setUserRoleAssignment] = useState({});
   const [newUserForm, setNewUserForm] = useState({ name: "", email: "", role: "Staff", password: "" });
   const [editingUserEmail, setEditingUserEmail] = useState(null);
   const [editingUserForm, setEditingUserForm] = useState({ name: "", email: "", role: "Staff" });
@@ -38,7 +37,6 @@ export default function Settings({ user, setUser }) {
     const storedRoles = JSON.parse(localStorage.getItem("roles") || "[]");
     const storedUsers = JSON.parse(localStorage.getItem("users") || "[]");
     const storedPermissions = JSON.parse(localStorage.getItem("rolePermissions") || "{}");
-    const storedAssignments = JSON.parse(localStorage.getItem("userRoleAssignment") || "{}");
 
     if (storedRoles.length === 0) {
       const defaultRoles = ["Admin", "Director", "Manager", "Staff"];
@@ -55,7 +53,6 @@ export default function Settings({ user, setUser }) {
     } else {
       setRoles(storedRoles);
       setRolePermissions(storedPermissions);
-      setUserRoleAssignment(storedAssignments);
     }
     setUsers(storedUsers);
   }, [availablePermissions]);
@@ -123,15 +120,6 @@ export default function Settings({ user, setUser }) {
       localStorage.setItem("rolePermissions", JSON.stringify(updatedPermissions));
       setSelectedRoleForEdit(null);
     }
-  };
-
-  const handleAssignUserRole = (userEmail, newRole) => {
-    const updated = { ...userRoleAssignment, [userEmail]: newRole };
-    setUserRoleAssignment(updated);
-    localStorage.setItem("userRoleAssignment", JSON.stringify(updated));
-    // Update the user in the users list as well
-    const updatedUsers = users.map(u => u.email === userEmail ? { ...u, role: newRole } : u);
-    localStorage.setItem("users", JSON.stringify(updatedUsers));
   };
 
   const handleAddNewUser = (e) => {
@@ -266,7 +254,7 @@ export default function Settings({ user, setUser }) {
           />
         )}
         <br />
-        <button type="submit" style={{ marginTop: "10px", padding: "10px 20px", backgroundColor: "#4CAF50", color: "#fff", border: "none", borderRadius: "5px" }}>
+        <button type="submit" style={{ marginTop: "10px", padding: "10px 20px", backgroundColor: "#f0f0f0", color: "#0A0A0A", border: "none", borderRadius: "5px" }}>
           Save Profile
         </button>
       </form>
@@ -287,7 +275,7 @@ export default function Settings({ user, setUser }) {
                 onChange={(e) => setNewRole(e.target.value)}
                 style={{ padding: "8px", flex: 1, borderRadius: "5px", border: "1px solid #ddd" }}
               />
-              <button onClick={handleAddRole} style={{ padding: "8px 20px", backgroundColor: "#4CAF50", color: "#fff", border: "none", borderRadius: "5px" }}>
+              <button onClick={handleAddRole} style={{ padding: "8px 20px", backgroundColor: "#f0f0f0", color: "#0A0A0A", border: "none", borderRadius: "5px" }}>
                 Add Role
               </button>
             </div>
@@ -320,12 +308,12 @@ export default function Settings({ user, setUser }) {
               </select>
               <input
                 type="text"
-                placeholder="Password (optional)"
+                placeholder="Password"
                 value={newUserForm.password}
                 onChange={(e) => setNewUserForm({ ...newUserForm, password: e.target.value })}
                 style={{ padding: "10px", border: "1px solid #ddd", borderRadius: "5px" }}
               />
-              <button type="submit" style={{ gridColumn: "span 1", padding: "12px", backgroundColor: "#1d4ed8", color: "#fff", border: "none", borderRadius: "5px", fontWeight: 700, cursor: "pointer" }}>
+              <button type="submit" style={{ gridColumn: "span 1", padding: "12px", backgroundColor: "#fff", color: "#0A0A0A", border: "none", borderRadius: "5px", fontWeight: 700, cursor: "pointer" }}>
                 Add User
               </button>
             </form>
@@ -345,8 +333,8 @@ export default function Settings({ user, setUser }) {
                         style={{
                           flex: 1,
                           padding: "10px",
-                          backgroundColor: selectedRoleForEdit === role ? "#2196F3" : "#e0e0e0",
-                          color: selectedRoleForEdit === role ? "#fff" : "#000",
+                          backgroundColor: selectedRoleForEdit === role ? "#4169E1" : "#f0f0f0",
+                          color: selectedRoleForEdit === role ? "#000" : "#0A0A0A",
                           border: "none",
                           borderRadius: "5px",
                           cursor: "pointer"
@@ -357,7 +345,7 @@ export default function Settings({ user, setUser }) {
                       {!["Admin", "Director"].includes(role) && (
                         <button
                           onClick={() => handleDeleteRole(role)}
-                          style={{ padding: "8px 12px", backgroundColor: "#f44336", color: "#fff", border: "none", borderRadius: "5px" }}
+                          style={{ padding: "8px 12px", backgroundColor: "#b71111", color: "#f0f0f0", border: "none", borderRadius: "5px" }}
                         >
                           ✕
                         </button>
@@ -417,7 +405,7 @@ export default function Settings({ user, setUser }) {
                         }}
                         style={{
                           padding: "6px 12px",
-                          backgroundColor: selectedUserEmail === u.email ? "#1d4ed8" : "#e0e0e0",
+                          backgroundColor: selectedUserEmail === u.email ? "#999" : "#e0e0e0",
                           color: selectedUserEmail === u.email ? "#fff" : "#000",
                           border: "none",
                           borderRadius: "5px",
@@ -445,20 +433,20 @@ export default function Settings({ user, setUser }) {
                 <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
                   <button
                     onClick={() => handleEditUser(selectedUserEmail)}
-                    style={{ padding: "10px 18px", backgroundColor: "#0066cc", color: "#fff", border: "none", borderRadius: "5px", cursor: "pointer" }}
+                    style={{ padding: "10px 18px", backgroundColor: "#f0f0f0", color: "#0A0A0A", border: "none", borderRadius: "5px", cursor: "pointer" }}
                   >
                     Edit
                   </button>
                   <button
                     onClick={() => handleResetUserPassword(selectedUserEmail)}
-                    style={{ padding: "10px 18px", backgroundColor: "#FF9800", color: "#fff", border: "none", borderRadius: "5px", cursor: "pointer" }}
+                    style={{ padding: "10px 18px", backgroundColor: "#f0f0f0", color: "#0A0A0A", border: "none", borderRadius: "5px", cursor: "pointer" }}
                   >
                     Reset Password
                   </button>
                   {selectedUserEmail !== user?.email ? (
                     <button
                       onClick={() => handleDeleteUser(selectedUserEmail)}
-                      style={{ padding: "10px 18px", backgroundColor: "#f44336", color: "#fff", border: "none", borderRadius: "5px", cursor: "pointer" }}
+                      style={{ padding: "10px 18px", backgroundColor: "#f0f0f0", color: "#0A0A0A", border: "none", borderRadius: "5px", cursor: "pointer" }}
                     >
                       Delete
                     </button>
@@ -505,8 +493,8 @@ export default function Settings({ user, setUser }) {
                     onClick={handleSaveEditUser}
                     style={{
                       padding: "10px 20px",
-                      backgroundColor: "#4CAF50",
-                      color: "#fff",
+                      backgroundColor: "#f0f0f0",
+                      color: "#0A0A0A",
                       border: "none",
                       borderRadius: "5px",
                       fontWeight: 700,
@@ -522,8 +510,8 @@ export default function Settings({ user, setUser }) {
                     }}
                     style={{
                       padding: "10px 20px",
-                      backgroundColor: "#999",
-                      color: "#fff",
+                      backgroundColor: "#fff",
+                      color: "#0A0A0A",
                       border: "none",
                       borderRadius: "5px",
                       cursor: "pointer"

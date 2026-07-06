@@ -1,25 +1,56 @@
 import React from "react";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import "../styles/Sidebar.css";
 
+const links = [
+  { to: "/dashboard", label: "Dashboard", icon: "◉" },
+  { to: "/inventory", label: "Inventory", icon: "▣" },
+  { to: "/orders", label: "Orders", icon: "☰" },
+  { to: "/purchase", label: "Purchase", icon: "🛒" },
+  { to: "/reporting", label: "Reporting", icon: "◌" },
+  { to: "/support", label: "Support", icon: "✉" },
+  { to: "/settings", label: "Settings", icon: "⚙" },
+];
+
 export default function Sidebar() {
-    return (
-        <div className="sidebar">
-            <div className="sidebar-header">
-                <h2 className="sidebar-title">Easy-Procure</h2>
-            </div>
-            <nav className="sidebar-nav">
-                <ul className="nav-list">
-                    <li><Link to="/" className="nav-link">📊 Dashboard</Link></li>
-                    <li><Link to="/inventory" className="nav-link">📦 Inventory</Link></li>
-                    <li><Link to="/orders" className="nav-link">📝 Orders</Link></li>
-                    <li><Link to="/purchase" className="nav-link">🛒 Purchase</Link></li>
-                    <li><Link to="/reporting" className="nav-link">📈 Reporting</Link></li>
-                    <li><Link to="/support" className="nav-link">💬 Support</Link></li>
-                    <li><Link to="/settings" className="nav-link">⚙️ Settings</Link></li>
-                </ul>
-            </nav>
+  const location = useLocation();
+
+  return (
+    <aside className="sidebar">
+      <div className="sidebar-header">
+        <div className="brand-badge">EP</div>
+        <div>
+          <p className="sidebar-eyebrow">Procurement control</p>
+          <h2 className="sidebar-title">Easy-Procure</h2>
         </div>
-    );
-}   
+      </div>
+
+      <div className="sidebar-section">
+        <p className="sidebar-section-label">Core modules</p>
+        <nav className="sidebar-nav">
+          <ul className="nav-list">
+            {links.map((link) => {
+              const isActive = location.pathname === link.to;
+              return (
+                <li key={link.to}>
+                  <Link to={link.to} className={`nav-link ${isActive ? "active" : ""}`}>
+                    <span className="nav-icon">{link.icon}</span>
+                    <span>{link.label}</span>
+                  </Link>
+                </li>
+              );
+            })}
+          </ul>
+        </nav>
+      </div>
+
+      <div className="sidebar-footer">
+        <div className="sidebar-footer-card">
+          <strong>Procurement flow</strong>
+          <span>Track demand, suppliers, and stock in one place.</span>
+        </div>
+      </div>
+    </aside>
+  );
+}
 

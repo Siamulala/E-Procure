@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useMemo, useState } from "react";
 import {
   Chart as ChartJS,
   ArcElement,
@@ -12,6 +12,7 @@ import {
   Legend,
 } from "chart.js";
 import { Pie, Bar, Line } from "react-chartjs-2";
+import "../styles/Pages.css";
 
 ChartJS.register(
   ArcElement,
@@ -26,67 +27,220 @@ ChartJS.register(
 );
 
 export default function Dashboard({ user, suppliers = [], orders = [], inventory = [], purchases = [] }) {
+  const [selectedSupplier, setSelectedSupplier] = useState(suppliers[0]?.name || "");
+  const [selectedCategory, setSelectedCategory] = useState("Tools");
+
+  const displayName = user?.name?.split(" ")?.[0] || "Guest";
+  const roleName = user?.role || "Guest";
+
+  const categories = React.useMemo(() => ["Tools", "ADSS Cables", "Drop Cables", "Accessories", "PPEs"], []);
+
+  const categorySpend = useMemo(() => {
+    return categories.map((category) => {
+      const matching = (inventory || []).filter((item) => {
+        const itemText = `${item.category || ""} ${item.item || ""}`.toLowerCase();
+        return itemText.includes(category.toLowerCase()) || category.toLowerCase().includes(itemText);
+      });
+      const total = matching.reduce((sum, item) => sum + ((Number(item.quantity) || 0) * (Number(item.amount) || 0)), 0);
+      return { category, total };
+    });
+  }, [categories, inventory]);
+
+  const monthlyExpenditure = useMemo(() => {
+    const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    return months.map((month) => {
+      const monthValue = (inventory || []).reduce((sum, item) => {
+        const matchesMonth = (item.date || "").includes(month.slice(0, 3)) || (item.month || "").toLowerCase() === month.toLowerCase();
+        return sum + (matchesMonth ? ((Number(item.quantity) || 0) * (Number(item.amount) || 0)) : 0);
+      }, 0);
+      return { month, value: monthValue };
+    });
+  }, [inventory]);
+
+  const annualExpenditure = monthlyExpenditure.reduce((sum, item) => sum + item.value, 0);
+  const lowStockItems = (inventory || []).filter((item) => Number(item.quantity) <= 5).length;
+  const activeSuppliers = suppliers.length;
+  const pendingOrders = orders.filter((order) => order.status === "Pending").length;
+
+  const overviewCards = [
+    { title: "Monthly Expenditure", value: `$${monthlyExpenditure[0]?.value.toFixed(2) || "0.00"}`, icon: "📅", accent: "#ecfdf5" },
+    { title: "Annual Expenditure", value: `$${annualExpenditure.toFixed(2)}`, icon: "🧾", accent: "#eff6ff" },
+    { title: "Low Stock Items", value: lowStockItems, icon: "⚠️", accent: "#fff7ed" },
+    { title: "Pending Orders", value: pendingOrders, icon: "🛒", accent: "#fdf2f8" }
+  ];
+
+  const inventoryTrendData = {
+    labels: monthlyExpenditure.map((entry) => entry.month),
+    datasets: [{
+      label: "Monthly spend",
+      data: monthlyExpenditure.map((entry) => entry.value),
+      borderColor: "#2563eb",
+      backgroundColor: "rgba(37, 99, 235, 0.2)",
+      tension: 0.45,
+      fill: true,
+      pointRadius: 4,
+      pointHoverRadius: 6,
+    }]
+  };
+
+  const categorySpendData = {
+    labels: categorySpend.map((entry) => entry.category),
+    datasets: [{
+      label: "Expenditure",
+      data: categorySpend.map((entry) => entry.total),
+      backgroundColor: ["#2563eb", "#22c55e", "#f59e0b", "#8b5cf6", "#ef4444"],
+      borderWidth: 1,
+    }]
+  };
+
+  const supplierSpendData = {
+    labels: suppliers.map((supplier) => supplier.name),
+    datasets: [{
+      label: "Supplier spend",
+      data: suppliers.map((supplier) => (supplier.totalSpend || 0)),
+      backgroundColor: "#0f766e",
+    }]
+  };
+
+  const selectedSupplierSpend = suppliers.find((supplier) => supplier.name === selectedSupplier);
+  const selectedCategorySpend = categorySpend.find((entry) => entry.category === selectedCategory);
+  const supplierScoreData = {
+    labels: ["Delivery", "Cost", "Reliability", "Service"],
+    datasets: [{
+      label: selectedSupplier || "Supplier score",
+      data: [
+        selectedSupplierSpend?.deliveryScore || 0,
+        selectedSupplierSpend?.costScore || 0,
+        selectedSupplierSpend?.reliabilityScore || 0,
+        selectedSupplierSpend?.serviceScore || 0,
+      ],
+      backgroundColor: "rgba(37, 99, 235, 0.2)",
+      borderColor: "#2563eb",
+      borderWidth: 2,
+      fill: true,
+    }]
+  };
+
+  const categoryScoreData = {
+    labels: ["Demand", "Availability", "Risk", "Margin"],
+    datasets: [{
+      label: selectedCategory || "Category score",
+      data: [
+        selectedCategorySpend?.total ? Math.min(100, selectedCategorySpend.total / 100) : 0,
+        selectedCategorySpend?.total ? Math.min(100, selectedCategorySpend.total / 120) : 0,
+        selectedCategorySpend?.total ? Math.max(0, 100 - selectedCategorySpend.total / 200) : 0,
+        selectedCategorySpend?.total ? Math.min(100, 70 + selectedCategorySpend.total / 1000) : 0,
+      ],
+      backgroundColor: "rgba(34, 197, 94, 0.2)",
+      borderColor: "#22c55e",
+      borderWidth: 2,
+      fill: true,
+    }]
+  };
+
   if (!user) {
     return (
-      <div style={{ padding: 60, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
-        <h2>Please sign in to view the dashboard</h2>
-        <p>If you don't have an account, open <a href="/users">Users</a> to create one.</p>
-        <a href="/login" style={{ marginTop: 12, padding: '10px 16px', background: '#36A2EB', color: '#fff', borderRadius: 6, textDecoration: 'none' }}>Go to Login</a>
+      <div className="page-shell">
+        <div className="page-card" style={{ textAlign: "center", padding: "48px 24px" }}>
+          <p className="page-eyebrow">Secure access</p>
+          <h2 className="page-title">Please sign in to view the dashboard</h2>
+          <p className="page-subtitle">If you do not have an account, visit the users screen to create one.</p>
+          <a className="primary-btn" href="/login" style={{ display: "inline-block", marginTop: "12px" }}>Go to Login</a>
+        </div>
       </div>
     );
   }
 
-  const displayName = user?.name?.split(" ")?.[0] || "Guest";
-  const profilePic = user?.profilePic || "/images/default-avatar.svg";
-  const roleName = user?.role || "Guest";
-
-  const overviewCards = [
-    { title: "Active Suppliers", value: suppliers.length, icon: "🏭", color: "#E8F8F4" },
-    { title: "Pending Orders", value: orders.filter(o => o.status === "Pending").length, icon: "🛒", color: "#E8F4F8" },
-    { title: "Inventory Items", value: inventory.reduce((sum, item) => sum + (item.quantity || 0), 0), icon: "📦", color: "#F8F4E8" },
-    { title: "Approvals Today", value: orders.filter(o => o.approvedDate === new Date().toDateString()).length, icon: "✅", color: "#F8E8E8" }
-  ];
-
-  const supplierData = { labels: suppliers.map(s => s.name), datasets: [{ label: "Delivery Score", data: suppliers.map(s => s.deliveryScore || 0), backgroundColor: "#4CAF50" }] };
-  const departments = ["IT", "Finance", "HR", "Operations"];
-  const deptRequestsData = { labels: departments, datasets: [{ label: "Approved", data: departments.map(d => orders.filter(o => o.department === d && o.status === "Approved").length), backgroundColor: "#36A2EB" }, { label: "Pending", data: departments.map(d => orders.filter(o => o.department === d && o.status === "Pending").length), backgroundColor: "#FF9800" }] };
-  const purchaseTrendsData = { labels: (purchases || []).map(p => p.month), datasets: [{ label: "Purchases", data: (purchases || []).map(p => p.total || 0), borderColor: "#36A2EB", fill: false }, { label: "Requests", data: (purchases || []).map(p => p.requests || 0), borderColor: "#FF6384", fill: false }] };
-  const inventoryData = { labels: ["In Stock", "Out of Stock"], datasets: [{ data: [(inventory || []).filter(i => i.quantity > 0).length, (inventory || []).filter(i => i.quantity === 0).length], backgroundColor: ["#4CAF50", "#FF6384"] }] };
-  const orderPipelineData = { labels: ["Pending", "Approved", "Fulfilled"], datasets: [{ label: "Orders", data: [(orders || []).filter(o => o.status === "Pending").length, (orders || []).filter(o => o.status === "Approved").length, (orders || []).filter(o => o.status === "Fulfilled").length], backgroundColor: ["#FF9800", "#36A2EB", "#4CAF50"] }] };
-  const budgetData = { labels: (purchases || []).map(p => p.month), datasets: [{ type: "line", label: "Expenses", data: (purchases || []).map(p => p.expense || 0), borderColor: "#FF6384" }, { type: "bar", label: "Budget", data: (purchases || []).map(p => p.budget || 0), backgroundColor: "#36A2EB" }] };
-
-  const cardStyle = (bgColor) => ({ padding: "20px", borderRadius: "8px", backgroundColor: bgColor, border: "1px solid #ddd", display: "flex", alignItems: "center", gap: "15px", flex: "1", minWidth: "200px" });
-  const chartContainerStyle = { backgroundColor: "#fff", padding: "20px", borderRadius: "8px", border: "1px solid #ddd", marginTop: "20px" };
-
   return (
-    <div style={{ padding: "40px", backgroundColor: "#f5f5f5", minHeight: "100vh" }}>
-      <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: "20px" }}>
-        <button onClick={() => window.print()} style={{ padding: "10px 20px", backgroundColor: "#16a34a", color: "#fff", border: "none", borderRadius: "5px", cursor: "pointer", fontWeight: 600 }}>📄 Print Dashboard</button>
+    <div className="page-shell">
+      <div className="page-header">
+        <div>
+          <p className="page-eyebrow">Procurement intelligence</p>
+          <h1 className="page-title">Hi, {displayName}</h1>
+          <p className="page-subtitle">{roleName} • {inventory.length} stock entries • {activeSuppliers} active suppliers</p>
+        </div>
+        <button onClick={() => window.print()} className="secondary-btn">📄 Print dashboard</button>
       </div>
 
-      <div style={{ marginBottom: "40px" }}>
-        <h1 style={{ fontSize: "28px", color: "#333", margin: 0 }}>Hi, {displayName} 👋</h1>
-        <img src={profilePic} alt="Profile" style={{ width: "80px", height: "80px", borderRadius: "50%", marginTop: "10px" }} />
-        <p style={{ color: "#999", marginTop: "5px", fontSize: "14px" }}>Role: {roleName}</p>
-      </div>
-
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: "20px", marginBottom: "40px" }}>
+      <div className="page-grid page-grid--cards">
         {overviewCards.map((card, idx) => (
-          <div key={idx} style={cardStyle(card.color)}>
-            <div style={{ fontSize: "32px" }}>{card.icon}</div>
+          <div key={idx} className="page-card stat-card" style={{ background: card.accent }}>
+            <div className="stat-icon">{card.icon}</div>
             <div>
-              <div style={{ color: "#999", fontSize: "12px" }}>{card.title}</div>
-              <div style={{ fontSize: "24px", fontWeight: "bold", color: "#333" }}>{card.value}</div>
+              <p className="stat-title">{card.title}</p>
+              <p className="stat-value">{card.value}</p>
             </div>
           </div>
         ))}
       </div>
 
-      <div style={chartContainerStyle}><h3>Supplier Performance</h3><Bar data={supplierData} /></div>
-      <div style={chartContainerStyle}><h3>Departmental Requests</h3><Bar data={deptRequestsData} options={{ plugins: { legend: { position: "bottom" } }, responsive: true }} /></div>
-      <div style={chartContainerStyle}><h3>Purchase Trends</h3><Line data={purchaseTrendsData} /></div>
-      <div style={chartContainerStyle}><h3>Inventory Status</h3><Pie data={inventoryData} /></div>
-      <div style={chartContainerStyle}><h3>Order Pipeline</h3><Bar data={orderPipelineData} options={{ indexAxis: "y" }} /></div>
+      <div className="page-grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))" }}>
+        <div className="page-card">
+          <div className="panel-heading">
+            <h3 className="panel-title">Monthly spend</h3>
+            <span className="soft-pill">Live trend</span>
+          </div>
+          <Line data={inventoryTrendData} options={{ responsive: true, plugins: { legend: { display: true } }, scales: { y: { beginAtZero: true } } }} />
+        </div>
+        <div className="page-card">
+          <div className="panel-heading">
+            <h3 className="panel-title">Category spend</h3>
+            <span className="soft-pill">By category</span>
+          </div>
+          <Pie data={categorySpendData} options={{ responsive: true, plugins: { legend: { position: "bottom" } } }} />
+        </div>
+        <div className="page-card">
+          <div className="panel-heading">
+            <h3 className="panel-title">Supplier spend</h3>
+            <span className="soft-pill">Performance</span>
+          </div>
+          <Bar data={supplierSpendData} options={{ responsive: true }} />
+        </div>
+        <div className="page-card">
+          <div className="panel-heading">
+            <h3 className="panel-title">Stock status</h3>
+            <span className="soft-pill">Inventory health</span>
+          </div>
+          <Pie data={{
+            labels: ["In Stock", "Low Stock", "Out of Stock"],
+            datasets: [{
+              data: [
+                (inventory || []).filter((item) => Number(item.quantity) > 5).length,
+                (inventory || []).filter((item) => Number(item.quantity) > 0 && Number(item.quantity) <= 5).length,
+                (inventory || []).filter((item) => Number(item.quantity) === 0).length,
+              ],
+              backgroundColor: ["#22c55e", "#f59e0b", "#ef4444"]
+            }]
+          }} options={{ responsive: true, plugins: { legend: { position: "bottom" } } }} />
+        </div>
+      </div>
+
+      <div className="page-card">
+        <div className="panel-heading">
+          <h3 className="panel-title">Supplier scorecard</h3>
+          <select id="supplier-select" value={selectedSupplier} onChange={(event) => setSelectedSupplier(event.target.value)} className="input-field" style={{ maxWidth: 200 }}>
+            {suppliers.map((supplier) => <option key={supplier.name} value={supplier.name}>{supplier.name}</option>)}
+          </select>
+        </div>
+        <Bar data={supplierScoreData} options={{ responsive: true, scales: { r: { suggestedMin: 0, suggestedMax: 100 } } }} />
+      </div>
+
+      <div className="page-card">
+        <div className="panel-heading">
+          <h3 className="panel-title">Category scorecard</h3>
+          <select id="category-select" value={selectedCategory} onChange={(event) => setSelectedCategory(event.target.value)} className="input-field" style={{ maxWidth: 200 }}>
+            {categories.map((category) => <option key={category} value={category}>{category}</option>)}
+          </select>
+        </div>
+        <Line data={categoryScoreData} options={{ responsive: true, scales: { y: { suggestedMin: 0, suggestedMax: 100 } } }} />
+      </div>
+
+      <div className="page-card">
+        <h3 className="panel-title">Procurement summary</h3>
+        <p className="panel-copy" style={{ marginTop: "6px" }}>
+          You have {activeSuppliers} active supplier(s), {pendingOrders} pending order(s), and {lowStockItems} low-stock item(s) to review. The current annual spend is ${annualExpenditure.toFixed(2)} across the major categories.
+        </p>
+      </div>
     </div>
   );
 }

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { BrowserRouter as Router, Routes, Route, Navigate, Outlet } from "react-router-dom";
+import "./App.css";
 import Sidebar from "./components/Sidebar";
 import Navbar from "./components/Navbar";
 import Inventory from "./pages/Inventory";
@@ -16,11 +17,11 @@ import TestFlows from "./pages/TestFlows";
 function App() {
   const [user, setUser] = useState(null);
 
-  // ✅ Global state for data
   const [orders, setOrders] = useState([]);
   const [inventory, setInventory] = useState([]);
   const [purchases, setPurchases] = useState([]);
   const [notifications, setNotifications] = useState([]);
+  const [inventorySearch, setInventorySearch] = useState("");
 
   useEffect(() => {
     const savedUser = localStorage.getItem("user");
@@ -39,7 +40,6 @@ function App() {
       }
     }
     if (savedUser) setUser(JSON.parse(savedUser));
-    // hydrate persisting arrays
     setOrders(JSON.parse(localStorage.getItem("orders") || "[]"));
     setInventory(JSON.parse(localStorage.getItem("inventory") || "[]"));
     setPurchases(JSON.parse(localStorage.getItem("purchases") || "[]"));
@@ -87,30 +87,32 @@ function App() {
   };
 
   return (
-    <Router>
-      <div style={{ display: "flex" }}>
+    <Router future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+      <div className="app-shell">
         {user && <Sidebar user={user} />}
-        <div style={{ flex: 1, marginLeft: user ? "260px" : 0, padding: "100px 30px 30px 30px", minHeight: "100vh" }}>
-          {user && <Navbar user={user} onLogout={handleLogout} notifications={notifications} />}
-          <Routes>
-            <Route path="/" element={<CompanyLogin onLogin={handleLogin} />} />
-            <Route path="/login" element={<CompanyLogin onLogin={handleLogin} />} />
-            <Route path="/company-login" element={<CompanyLogin onLogin={handleLogin} />} />
+        <div className={`main-shell ${user ? "main-shell--with-sidebar" : ""}`}>
+          {user && <Navbar user={user} onLogout={handleLogout} notifications={notifications} onSearch={setInventorySearch} />}
+          <main className={`main-content ${user ? "main-content--with-nav" : "main-content--auth"}`}>
+            <Routes>
+              <Route path="/" element={user ? <Navigate to="/dashboard" replace /> : <CompanyLogin onLogin={handleLogin} />} />
+              <Route path="/login" element={user ? <Navigate to="/dashboard" replace /> : <CompanyLogin onLogin={handleLogin} />} />
+              <Route path="/company-login" element={user ? <Navigate to="/dashboard" replace /> : <CompanyLogin onLogin={handleLogin} />} />
 
-            <Route element={<RequireAuth user={user} />}>
-              <Route path="/dashboard" element={<Dashboard user={user} orders={orders} inventory={inventory} purchases={purchases} />} />
-              <Route path="/orders" element={<Orders orders={orders} setOrders={setOrders} user={user} />} />
-              <Route path="/inventory" element={<Inventory inventory={inventory} setInventory={setInventory} user={user} />} />
-              <Route path="/purchase" element={<Purchase orders={orders} setOrders={setOrders} setInventory={setInventory} purchases={purchases} setPurchases={setPurchases} user={user} pushNotification={pushNotification} />} />
-              <Route path="/test" element={<TestFlows user={user} setUser={setUser} orders={orders} setOrders={setOrders} purchases={purchases} setPurchases={setPurchases} inventory={inventory} setInventory={setInventory} pushNotification={pushNotification} />} />
-              <Route path="/reporting" element={<Reporting orders={orders} purchases={purchases} inventory={inventory} />} />
-              <Route path="/support" element={<Support />} />
-              <Route path="/settings" element={<Settings user={user} setUser={setUser} />} />
-              <Route path="/users" element={<Users />} />
-            </Route>
+              <Route element={<RequireAuth user={user} />}>
+                <Route path="/dashboard" element={<Dashboard user={user} orders={orders} inventory={inventory} purchases={purchases} />} />
+                <Route path="/orders" element={<Orders orders={orders} setOrders={setOrders} user={user} />} />
+                <Route path="/inventory" element={<Inventory inventory={inventory} setInventory={setInventory} user={user} searchTerm={inventorySearch} />} />
+                <Route path="/purchase" element={<Purchase orders={orders} setOrders={setOrders} setInventory={setInventory} purchases={purchases} setPurchases={setPurchases} user={user} pushNotification={pushNotification} />} />
+                <Route path="/test" element={<TestFlows user={user} setUser={setUser} orders={orders} setOrders={setOrders} purchases={purchases} setPurchases={setPurchases} inventory={inventory} setInventory={setInventory} pushNotification={pushNotification} />} />
+                <Route path="/reporting" element={<Reporting orders={orders} purchases={purchases} inventory={inventory} />} />
+                <Route path="/support" element={<Support />} />
+                <Route path="/settings" element={<Settings user={user} setUser={setUser} />} />
+                <Route path="/users" element={<Users />} />
+              </Route>
 
-            <Route path="*" element={<Navigate to={user ? "/dashboard" : "/login"} replace />} />
-          </Routes>
+              <Route path="*" element={<Navigate to={user ? "/dashboard" : "/login"} replace />} />
+            </Routes>
+          </main>
         </div>
       </div>
     </Router>

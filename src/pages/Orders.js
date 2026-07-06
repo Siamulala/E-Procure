@@ -64,18 +64,18 @@ export default function Orders({ orders, setOrders, user }) {
     };
 
     const startEdit = (i) => { setEditingIndex(i); setEditValues(orders[i]); setOpenMenu(null); };
-    const saveEdit = (i) => { const next = orders.map((o,idx)=> idx===i?editValues:o); setOrders(next); setEditingIndex(null); };
-    const deleteRow = (i) => { if(!window.confirm('Delete order?')) return; setOrders(orders.filter((_,idx)=>idx!==i)); setOpenMenu(null); };
+    const saveEdit = (i) => { const next = orders.map((o, idx) => idx === i ? editValues : o); setOrders(next); setEditingIndex(null); };
+    const deleteRow = (i) => { if (!window.confirm('Delete order?')) return; setOrders(orders.filter((_, idx) => idx !== i)); setOpenMenu(null); };
 
     const visible = (o) => {
-      if (!user) return true;
-      if (user.role === 'Director') return true;
-      return o.status === 'Approved' || o.status === 'Fulfilled' || o.status === 'In Stock';
+        if (!user) return true;
+        if (user.role === 'Director') return true;
+        return o.status === 'Approved' || o.status === 'Fulfilled' || o.status === 'In Stock';
     };
 
-        const printOrders = () => {
-            const w = window.open("", "_blank");
-            w.document.write(`
+    const printOrders = () => {
+        const w = window.open("", "_blank");
+        w.document.write(`
                 <html><head><title>Orders Report</title><style>body{font-family:Arial;margin:20px}table{width:100%;border-collapse:collapse;margin:20px 0}th,td{border:1px solid #ddd;padding:10px}th{background:#f0f0f0}</style></head><body>
                 <h1>Orders Report</h1>
                 <p>Generated: ${new Date().toLocaleString()}</p>
@@ -83,14 +83,14 @@ export default function Orders({ orders, setOrders, user }) {
                 ${orders.filter(visible).map(o => `<tr><td>${o.department}</td><td>${o.item}</td><td>${o.quantity}</td><td>${o.supplier}</td><td>${o.status}</td><td>${o.date}</td></tr>`).join("")}
                 </table><button onclick="window.print()" style="margin-top:20px;padding:10px 20px">Print</button></body></html>
             `);
-        };
+    };
 
-        return (
-                <div style={{ padding: "30px" }}>
-                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px" }}>
-                            <h1>Orders</h1>
-                            <button onClick={printOrders} style={{ padding: "10px 20px", backgroundColor: "#16a34a", color: "#fff", border: "none", borderRadius: "5px", cursor: "pointer", fontWeight: 600 }}>📄 Print</button>
-                        </div>
+    return (
+        <div style={{ padding: "30px" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px" }}>
+                <h1>Orders</h1>
+                <button onClick={printOrders} style={{ padding: "10px 20px", backgroundColor: "#f0f0f0", color: "#000000", border: "none", borderRadius: "5px", cursor: "pointer", fontWeight: 600 }}>📄 Print</button>
+            </div>
 
             {/* Add Order Form */}
             <form
@@ -117,8 +117,8 @@ export default function Orders({ orders, setOrders, user }) {
                     style={{
                         gridColumn: "span 2",
                         padding: "10px",
-                        backgroundColor: "#4CAF50",
-                        color: "#fff",
+                        backgroundColor: "#f0f0f0",
+                        color: "#3B3B3B",
                         border: "none",
                         borderRadius: "5px"
                     }}
@@ -145,30 +145,30 @@ export default function Orders({ orders, setOrders, user }) {
                     {orders.filter(visible).map((o, i) => (
                         <tr key={i}>
                             <td>{i + 1}</td>
-                            <td>{editingIndex===i ? <input value={editValues.department||""} onChange={(e)=>setEditValues({...editValues,department:e.target.value})} /> : o.department}</td>
-                            <td>{editingIndex===i ? <input value={editValues.item||""} onChange={(e)=>setEditValues({...editValues,item:e.target.value})} /> : o.item}</td>
-                            <td>{editingIndex===i ? <input value={editValues.quantity||""} onChange={(e)=>setEditValues({...editValues,quantity:e.target.value})} /> : o.quantity}</td>
-                            <td>{editingIndex===i ? <input value={editValues.supplier||""} onChange={(e)=>setEditValues({...editValues,supplier:e.target.value})} /> : o.supplier}</td>
-                            <td>{editingIndex===i ? <select value={editValues.status||"Pending"} onChange={(e)=>setEditValues({...editValues,status:e.target.value})}><option>Pending</option><option>Approved</option><option>Fulfilled</option></select> : o.status}</td>
-                            <td>{editingIndex===i ? <input type="date" value={editValues.date||""} onChange={(e)=>setEditValues({...editValues,date:e.target.value})} /> : o.date}</td>
+                            <td>{editingIndex === i ? <input value={editValues.department || ""} onChange={(e) => setEditValues({ ...editValues, department: e.target.value })} /> : o.department}</td>
+                            <td>{editingIndex === i ? <input value={editValues.item || ""} onChange={(e) => setEditValues({ ...editValues, item: e.target.value })} /> : o.item}</td>
+                            <td>{editingIndex === i ? <input value={editValues.quantity || ""} onChange={(e) => setEditValues({ ...editValues, quantity: e.target.value })} /> : o.quantity}</td>
+                            <td>{editingIndex === i ? <input value={editValues.supplier || ""} onChange={(e) => setEditValues({ ...editValues, supplier: e.target.value })} /> : o.supplier}</td>
+                            <td>{editingIndex === i ? <select value={editValues.status || "Pending"} onChange={(e) => setEditValues({ ...editValues, status: e.target.value })}><option>Pending</option><option>Approved</option><option>Fulfilled</option></select> : o.status}</td>
+                            <td>{editingIndex === i ? <input type="date" value={editValues.date || ""} onChange={(e) => setEditValues({ ...editValues, date: e.target.value })} /> : o.date}</td>
                             <td style={{ position: 'relative' }}>
-                                <button onClick={() => setOpenMenu(openMenu===i?null:i)}>⋯</button>
-                                {openMenu===i && (
-                                  <div style={{ position: 'absolute', right: 0, background:'#fff', border:'1px solid #ddd', padding:8, zIndex:10 }}>
-                                    {editingIndex===i ? (
-                                      <>
-                                        <button onClick={()=>saveEdit(i)}>Save</button>
-                                        <button onClick={()=>setEditingIndex(null)}>Cancel</button>
-                                      </>
-                                    ) : (
-                                      <>
-                                        <button onClick={()=>startEdit(i)}>Edit</button>
-                                        <button onClick={()=>exportRow(o)}>Export</button>
-                                        <button onClick={()=>printRow(o)}>Print</button>
-                                        <button onClick={()=>deleteRow(i)}>Delete</button>
-                                      </>
-                                    )}
-                                  </div>
+                                <button onClick={() => setOpenMenu(openMenu === i ? null : i)}>⋯</button>
+                                {openMenu === i && (
+                                    <div style={{ position: 'absolute', right: 0, background: '#fff', border: '1px solid #ddd', padding: 8, zIndex: 10 }}>
+                                        {editingIndex === i ? (
+                                            <>
+                                                <button onClick={() => saveEdit(i)}>Save</button>
+                                                <button onClick={() => setEditingIndex(null)}>Cancel</button>
+                                            </>
+                                        ) : (
+                                            <>
+                                                <button onClick={() => startEdit(i)}>Edit</button>
+                                                <button onClick={() => exportRow(o)}>Export</button>
+                                                <button onClick={() => printRow(o)}>Print</button>
+                                                <button onClick={() => deleteRow(i)}>Delete</button>
+                                            </>
+                                        )}
+                                    </div>
                                 )}
                             </td>
                         </tr>
