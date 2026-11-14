@@ -1,0 +1,58 @@
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: alwen
+      POSTGRES_USER: alwen
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Create a root .env from .env.example}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U alwen -d alwen"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    volumes:
+      - alwen_postgres_data:/var/lib/postgresql/data
+
+  api:
+    build:
+      context: ./api
+    environment:
+      DATABASE_URL: postgresql+psycopg://alwen:${POSTGRES_PASSWORD}@db:5432/alwen
+      ALWEN_PASSWORD_RESET_KEY: ${ALWEN_PASSWORD_RESET_KEY:-}
+      ALWEN_CORS_ORIGINS: ${ALWEN_CORS_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000,http://localhost:3001,http://127.0.0.1:3001}
+      ALWEN_UPLOAD_DIR: /app/uploads
+      ALWEN_APPROVAL_ESCALATION_DAYS: ${ALWEN_APPROVAL_ESCALATION_DAYS:-5}
+      ALWEN_SMTP_HOST: ${ALWEN_SMTP_HOST:-}
+      ALWEN_SMTP_PORT: ${ALWEN_SMTP_PORT:-587}
+      ALWEN_SMTP_USER: ${ALWEN_SMTP_USER:-}
+      ALWEN_SMTP_PASSWORD: ${ALWEN_SMTP_PASSWORD:-}
+      ALWEN_SMTP_FROM: ${ALWEN_SMTP_FROM:-}
+      ALWEN_SMS_ENABLED: ${ALWEN_SMS_ENABLED:-false}
+      AFRICASTALKING_USERNAME: ${AFRICASTALKING_USERNAME:-}
+      AFRICASTALKING_API_KEY: ${AFRICASTALKING_API_KEY:-}
+      ALWEN_QBO_ENV: ${ALWEN_QBO_ENV:-sandbox}
+      ALWEN_QBO_CLIENT_ID: ${ALWEN_QBO_CLIENT_ID:-}
+      ALWEN_QBO_CLIENT_SECRET: ${ALWEN_QBO_CLIENT_SECRET:-}
+      ALWEN_QBO_REDIRECT_URI: ${ALWEN_QBO_REDIRECT_URI:-http://localhost:8000/integrations/qbo/callback}
+      ALWEN_QBO_ENCRYPTION_KEY: ${ALWEN_QBO_ENCRYPTION_KEY:-}
+      ALWEN_QBO_DEFAULT_EXPENSE_ACCOUNT_ID: ${ALWEN_QBO_DEFAULT_EXPENSE_ACCOUNT_ID:-}
+    command: >-
+      sh -c "alembic upgrade head &&
+      python -m alwen.seed &&
+      uvicorn alwen.main:app --host 0.0.0.0 --port 8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    volumes:
+      - alwen_uploads:/app/uploads
+    healthcheck:
+      test: ["CMD", "python", "-c", "from urllib.request import urlopen; urlopen('http://127.0.0.1:8000/health', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  alwen_postgres_data:
+  alwen_uploads:

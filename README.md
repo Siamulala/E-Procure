@@ -85,3 +85,9 @@ This section has moved here: [https://facebook.github.io/create-react-app/docs/d
 ### `npm run build` fails to minify
 
 This section has moved here: [https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify](https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify)
+
+## Alwen system migration
+
+The existing React/Express app is being migrated in phases. Phase 1 adds the SQLAlchemy schema, Alembic setup, reference seeds, and Excel import staging under [`api/`](./api/). Phase 2 adds authenticated purchase-request approval/conversion, purchase-order receiving, weighted-average stock balances, and the stock ledger. Phase 3 adds filtered analytics, quote/price comparisons, stock alerts, and CSV export for purchase-order commitments. See [the API README](./api/README.md) for setup, account creation, and workflow usage.
+
+The Alwen React workspace connects to the FastAPI service when `REACT_APP_ALWEN_API_URL` is set; otherwise the legacy browser-local app remains available. The uploaded workbook is available, but workbook-specific importer reconciliation remains deferred.

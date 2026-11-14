@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { alwenLogin, isAlwenApiConfigured } from "../services/alwenApi";
 
 const styles = `
   *, *::before, *::after { box-sizing: border-box; }
@@ -146,6 +147,8 @@ const styles = `
   }
 `;
 
+const API_BASE_URL = process.env.REACT_APP_API_URL || "http://localhost:5000";
+
 export default function CompanyLogin({ onLogin }) {
   const [login, setLogin] = useState("");
   const [password, setPassword] = useState("");
@@ -156,10 +159,18 @@ export default function CompanyLogin({ onLogin }) {
   const [successMessage, setSuccessMessage] = useState("");
   const [isForgotPassword, setIsForgotPassword] = useState(false);
   const [resetEmail, setResetEmail] = useState("");
+  const [resetCode, setResetCode] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [resetStep, setResetStep] = useState("request");
   const navigate = useNavigate();
 
   useEffect(() => {
     const storedUsers = JSON.parse(localStorage.getItem("users") || "[]");
+    if (isAlwenApiConfigured()) {
+      setUsers(Array.isArray(storedUsers) ? storedUsers : []);
+      return;
+    }
     const defaultUsers = [
       { name: "Admin", email: "admin@easyprocure.com", role: "Admin", password: "admin" },
       { name: "Lucas Obadoh", email: "lucas.obadoh@easyprocure.com", role: "Admin", password: "lucas1234" }
@@ -177,7 +188,7 @@ export default function CompanyLogin({ onLogin }) {
     setUsers(mergedUsers);
   }, []);
 
-  const handleSubmit = (event) => {
+  const handleSubmit = async (event) => {
     event.preventDefault();
     const trimmedLogin = login.trim();
     const trimmedPassword = password.trim();
@@ -190,6 +201,26 @@ export default function CompanyLogin({ onLogin }) {
     setErrorMessage("");
     setSuccessMessage("");
     setIsLoading(true);
+
+    if (isAlwenApiConfigured()) {
+      try {
+        const result = await alwenLogin(trimmedLogin, trimmedPassword);
+        if (onLogin) {
+          onLogin({
+            ...result.user,
+            name: result.user.full_name,
+            apiToken: result.access_token,
+            apiAuthenticated: true
+          });
+        }
+        navigate("/purchase");
+      } catch (error) {
+        setErrorMessage(error.message);
+      } finally {
+        setIsLoading(false);
+      }
+      return;
+    }
 
     const normalizedLogin = trimmedLogin.toLowerCase();
     const user = users.find((entry) => {
@@ -215,7 +246,7 @@ export default function CompanyLogin({ onLogin }) {
     navigate("/dashboard");
   };
 
-  const handleForgotPassword = (event) => {
+  const handleForgotPassword = async (event) => {
     event.preventDefault();
     const trimmedEmail = resetEmail.trim().toLowerCase();
 
@@ -226,21 +257,99 @@ export default function CompanyLogin({ onLogin }) {
     }
 
     const user = users.find((entry) => entry.email?.toLowerCase() === trimmedEmail);
-    if (!user) {
+    if (!isAlwenApiConfigured() && !user) {
       setErrorMessage("No account found for that email.");
       setSuccessMessage("");
       return;
     }
 
-    const updatedUsers = users.map((entry) =>
-      entry.email?.toLowerCase() === trimmedEmail ? { ...entry, password: "password123" } : entry
-    );
-    localStorage.setItem("users", JSON.stringify(updatedUsers));
-    setUsers(updatedUsers);
-    setSuccessMessage(`Password reset complete. Your new temporary password is password123. Please sign in and change it.`);
+    setIsLoading(true);
     setErrorMessage("");
-    setResetEmail("");
+    setSuccessMessage("");
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/auth/password-reset/request`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: trimmedEmail })
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "Unable to send a verification code.");
+
+      setResetEmail(trimmedEmail);
+      setResetStep("verify");
+      setSuccessMessage("A verification code has been sent to your email address.");
+    } catch (error) {
+      setErrorMessage(error instanceof TypeError
+        ? "Unable to reach the password reset service. Please try again later."
+        : error.message);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleCompletePasswordReset = async (event) => {
+    event.preventDefault();
+    const trimmedCode = resetCode.trim();
+
+    if (!/^\d{6}$/.test(trimmedCode)) {
+      setErrorMessage("Enter the six-digit verification code from your email.");
+      return;
+    }
+    if (newPassword.length < 8) {
+      setErrorMessage("Your new password must be at least 8 characters.");
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setErrorMessage("The passwords do not match.");
+      return;
+    }
+
+    setIsLoading(true);
+    setErrorMessage("");
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/auth/password-reset/verify`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: resetEmail,
+          code: trimmedCode,
+          ...(isAlwenApiConfigured() ? { newPassword } : {})
+        })
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "Unable to verify the code.");
+
+      if (!isAlwenApiConfigured()) {
+        const updatedUsers = users.map((entry) =>
+          entry.email?.toLowerCase() === resetEmail ? { ...entry, password: newPassword } : entry
+        );
+        localStorage.setItem("users", JSON.stringify(updatedUsers));
+        setUsers(updatedUsers);
+      }
+      setSuccessMessage("Password reset complete. Sign in with your new password.");
+      setErrorMessage("");
+      setResetCode("");
+      setNewPassword("");
+      setConfirmPassword("");
+      setResetStep("request");
+      setIsForgotPassword(false);
+    } catch (error) {
+      setErrorMessage(error instanceof TypeError
+        ? "Unable to reach the password reset service. Please try again later."
+        : error.message);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleBackToLogin = () => {
     setIsForgotPassword(false);
+    setResetStep("request");
+    setResetCode("");
+    setNewPassword("");
+    setConfirmPassword("");
+    setErrorMessage("");
+    setSuccessMessage("");
   };
 
   return (
@@ -282,27 +391,77 @@ export default function CompanyLogin({ onLogin }) {
           {successMessage ? <div className="success-message">{successMessage}</div> : null}
 
           {isForgotPassword ? (
-            <form className="login-form" onSubmit={handleForgotPassword}>
-              <div className="form-group">
-                <label htmlFor="reset-email">Email address</label>
-                <div className="input-wrap">
-                  <input
-                    id="reset-email"
-                    type="email"
-                    value={resetEmail}
-                    onChange={(event) => setResetEmail(event.target.value)}
-                    placeholder="Enter your email"
-                    autoComplete="off"
-                  />
+            <form className="login-form" onSubmit={resetStep === "request" ? handleForgotPassword : handleCompletePasswordReset}>
+              {resetStep === "request" ? (
+                <div className="form-group">
+                  <label htmlFor="reset-email">Email address</label>
+                  <div className="input-wrap">
+                    <input
+                      id="reset-email"
+                      type="email"
+                      value={resetEmail}
+                      onChange={(event) => setResetEmail(event.target.value)}
+                      placeholder="Enter your email"
+                      autoComplete="email"
+                      required
+                    />
+                  </div>
                 </div>
-              </div>
+              ) : (
+                <>
+                  <div className="form-group">
+                    <label htmlFor="reset-code">Verification code</label>
+                    <div className="input-wrap">
+                      <input
+                        id="reset-code"
+                        type="text"
+                        inputMode="numeric"
+                        autoComplete="one-time-code"
+                        value={resetCode}
+                        onChange={(event) => setResetCode(event.target.value)}
+                        placeholder="Enter the 6-digit code"
+                        maxLength={6}
+                        required
+                      />
+                    </div>
+                  </div>
+                  <div className="form-group">
+                    <label htmlFor="new-password">New password</label>
+                    <div className="input-wrap">
+                      <input
+                        id="new-password"
+                        type="password"
+                        autoComplete="new-password"
+                        value={newPassword}
+                        onChange={(event) => setNewPassword(event.target.value)}
+                        placeholder="At least 8 characters"
+                        required
+                      />
+                    </div>
+                  </div>
+                  <div className="form-group">
+                    <label htmlFor="confirm-password">Confirm new password</label>
+                    <div className="input-wrap">
+                      <input
+                        id="confirm-password"
+                        type="password"
+                        autoComplete="new-password"
+                        value={confirmPassword}
+                        onChange={(event) => setConfirmPassword(event.target.value)}
+                        placeholder="Re-enter your new password"
+                        required
+                      />
+                    </div>
+                  </div>
+                </>
+              )}
 
               <div className="form-footer">
-                <button type="button" className="forgot" onClick={() => { setIsForgotPassword(false); setErrorMessage(""); setSuccessMessage(""); }}>
+                <button type="button" className="forgot" onClick={handleBackToLogin}>
                   Back to login
                 </button>
-                <button type="submit" className="sign-in-btn">
-                  Reset password
+                <button type="submit" className="sign-in-btn" disabled={isLoading}>
+                  {isLoading ? "Please wait…" : resetStep === "request" ? "Send code" : "Reset password"}
                 </button>
               </div>
             </form>
@@ -316,7 +475,7 @@ export default function CompanyLogin({ onLogin }) {
                     type="text"
                     value={login}
                     onChange={(event) => setLogin(event.target.value)}
-                    placeholder="Enter your username"
+                    placeholder={isAlwenApiConfigured() ? "Enter your email" : "Enter your username"}
                     autoComplete="off"
                   />
                 </div>
@@ -345,7 +504,7 @@ export default function CompanyLogin({ onLogin }) {
               </div>
 
               <div className="form-footer">
-                <button type="button" className="forgot" onClick={() => { setIsForgotPassword(true); setErrorMessage(""); setSuccessMessage(""); }}>
+                <button type="button" className="forgot" onClick={() => { setIsForgotPassword(true); setResetStep("request"); setErrorMessage(""); setSuccessMessage(""); }}>
                   Forgot your password?
                 </button>
                 <button type="submit" className="sign-in-btn" disabled={isLoading}>

@@ -12,7 +12,7 @@ const links = [
   { to: "/settings", label: "Settings", icon: "⚙" },
 ];
 
-export default function Sidebar() {
+export default function Sidebar({ user }) {
   const location = useLocation();
 
   return (
@@ -29,7 +29,14 @@ export default function Sidebar() {
         <p className="sidebar-section-label">Core modules</p>
         <nav className="sidebar-nav">
           <ul className="nav-list">
-            {links.map((link) => {
+            {[...links, ...(user?.apiAuthenticated ? [
+              { to: "/alwen/suppliers", label: "Suppliers", icon: "◇" },
+              { to: "/alwen/contracts", label: "Contracts", icon: "▤" },
+              { to: "/alwen/invoices", label: "Invoices", icon: "▧" },
+              { to: "/alwen/reports", label: "Procurement reports", icon: "◌" },
+              { to: "/alwen/notifications", label: "Notifications", icon: "◉" },
+              ...(user.role === "Admin" ? [{ to: "/alwen/qbo", label: "QuickBooks", icon: "↔" }] : [])
+            ] : [])].map((link) => {
               const isActive = location.pathname === link.to;
               return (
                 <li key={link.to}>

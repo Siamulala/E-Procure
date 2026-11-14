@@ -13,6 +13,9 @@ import Orders from "./pages/Orders";
 import CompanyLogin from "./pages/CompanyLogin";
 import Users from "./pages/Users";
 import TestFlows from "./pages/TestFlows";
+import AlwenOperations from "./pages/alwen/AlwenOperations";
+import AlwenFeatures from "./pages/alwen/AlwenFeatures";
+import { alwenApiRequest, isAlwenApiConfigured } from "./services/alwenApi";
 
 function App() {
   const [user, setUser] = useState(null);
@@ -26,20 +29,27 @@ function App() {
   useEffect(() => {
     const savedUser = localStorage.getItem("user");
     const storedUsers = JSON.parse(localStorage.getItem("users") || "[]");
-    if (storedUsers.length === 0) {
+    if (!isAlwenApiConfigured() && storedUsers.length === 0) {
       const defaultUsers = [
         { name: "Admin", email: "admin@easyprocure.com", role: "Admin", password: "admin" },
         { name: "Lucas Obadoh", email: "lucas.Obadoh@easyproure.com", role: "Admin", password: "lucas1234" }
       ];
       localStorage.setItem("users", JSON.stringify(defaultUsers));
-    } else {
+    } else if (!isAlwenApiConfigured()) {
       const hasLucas = storedUsers.some((u) => u.email === "lucas.Obadoh@easyproure.com");
       if (!hasLucas) {
         storedUsers.push({ name: "Lucas Obadoh", email: "lucas.Obadoh@easyproure.com", role: "Admin", password: "lucas1234" });
         localStorage.setItem("users", JSON.stringify(storedUsers));
       }
     }
-    if (savedUser) setUser(JSON.parse(savedUser));
+    if (savedUser) {
+      const restoredUser = JSON.parse(savedUser);
+      if (restoredUser?.apiAuthenticated && !sessionStorage.getItem("alwenApiToken")) {
+        localStorage.removeItem("user");
+      } else {
+        setUser(restoredUser);
+      }
+    }
     setOrders(JSON.parse(localStorage.getItem("orders") || "[]"));
     setInventory(JSON.parse(localStorage.getItem("inventory") || "[]"));
     setPurchases(JSON.parse(localStorage.getItem("purchases") || "[]"));
@@ -47,8 +57,19 @@ function App() {
   }, []);
 
   useEffect(() => {
-    localStorage.setItem("user", JSON.stringify(user));
+    if (user) localStorage.setItem("user", JSON.stringify(user));
+    else localStorage.removeItem("user");
   }, [user]);
+
+  useEffect(() => {
+    const expireApiSession = () => {
+      sessionStorage.removeItem("alwenApiToken");
+      localStorage.removeItem("user");
+      setUser(null);
+    };
+    window.addEventListener("alwen:session-expired", expireApiSession);
+    return () => window.removeEventListener("alwen:session-expired", expireApiSession);
+  }, []);
 
   useEffect(() => {
     localStorage.setItem("orders", JSON.stringify(orders));
@@ -67,11 +88,26 @@ function App() {
   }, [notifications]);
 
   const handleLogin = (u) => {
+    if (u.apiToken) {
+      const { apiToken, ...profile } = u;
+      sessionStorage.setItem("alwenApiToken", apiToken);
+      setUser(profile);
+      localStorage.setItem("user", JSON.stringify(profile));
+      return;
+    }
     setUser(u);
     localStorage.setItem("user", JSON.stringify(u));
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    if (sessionStorage.getItem("alwenApiToken")) {
+      try {
+        await alwenApiRequest("/auth/logout", { method: "POST" });
+      } catch (error) {
+        console.error("Could not revoke the Alwen API session during logout.", error);
+      }
+    }
+    sessionStorage.removeItem("alwenApiToken");
     setUser(null);
     localStorage.removeItem("user");
   };
@@ -99,10 +135,11 @@ function App() {
               <Route path="/company-login" element={user ? <Navigate to="/dashboard" replace /> : <CompanyLogin onLogin={handleLogin} />} />
 
               <Route element={<RequireAuth user={user} />}>
-                <Route path="/dashboard" element={<Dashboard user={user} orders={orders} inventory={inventory} purchases={purchases} />} />
-                <Route path="/orders" element={<Orders orders={orders} setOrders={setOrders} user={user} />} />
-                <Route path="/inventory" element={<Inventory inventory={inventory} setInventory={setInventory} user={user} searchTerm={inventorySearch} />} />
-                <Route path="/purchase" element={<Purchase orders={orders} setOrders={setOrders} setInventory={setInventory} purchases={purchases} setPurchases={setPurchases} user={user} pushNotification={pushNotification} />} />
+                <Route path="/dashboard" element={user?.apiAuthenticated ? <AlwenOperations user={user} initialTab="requests" /> : <Dashboard user={user} orders={orders} inventory={inventory} purchases={purchases} />} />
+                <Route path="/alwen/:section" element={user?.apiAuthenticated ? <AlwenFeatures user={user} /> : <Navigate to="/dashboard" replace />} />
+                <Route path="/orders" element={user?.apiAuthenticated ? <AlwenOperations user={user} initialTab="orders" /> : <Orders orders={orders} setOrders={setOrders} user={user} />} />
+                <Route path="/inventory" element={user?.apiAuthenticated ? <AlwenOperations user={user} initialTab="stock" /> : <Inventory inventory={inventory} setInventory={setInventory} user={user} searchTerm={inventorySearch} />} />
+                <Route path="/purchase" element={user?.apiAuthenticated ? <AlwenOperations user={user} initialTab="requests" /> : <Purchase orders={orders} setOrders={setOrders} setInventory={setInventory} purchases={purchases} setPurchases={setPurchases} user={user} pushNotification={pushNotification} />} />
                 <Route path="/test" element={<TestFlows user={user} setUser={setUser} orders={orders} setOrders={setOrders} purchases={purchases} setPurchases={setPurchases} inventory={inventory} setInventory={setInventory} pushNotification={pushNotification} />} />
                 <Route path="/reporting" element={<Reporting orders={orders} purchases={purchases} inventory={inventory} />} />
                 <Route path="/support" element={<Support />} />

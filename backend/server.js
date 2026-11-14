@@ -1,8 +1,11 @@
+require("dotenv").config();
+
 const express = require("express");
 const mongoose = require("mongoose");
 const cors = require("cors");
 const bodyParser = require("body-parser");
 const apiRouter = require("./routes/api");
+const authRouter = require("./routes/auth");
 
 const app = express();
 app.use(cors());
@@ -15,6 +18,7 @@ mongoose.connect("mongodb://127.0.0.1:27017/easyprocure")
 
 // API routes
 app.use("/api", apiRouter);
+app.use("/api/auth", authRouter);
 
 // Test route
 app.get("/", (req, res) => {

@@ -43,20 +43,35 @@ test('shows profile actions in the navbar for signed-in users', () => {
   expect(screen.getByText(/Sign out/i)).toBeInTheDocument();
 });
 
-test('allows a user to reset their password and sign in with the temporary password', () => {
+test('allows a user to reset their password using an emailed verification code', async () => {
+  const originalFetch = global.fetch;
+  const fetchMock = jest.fn()
+    .mockResolvedValueOnce({ ok: true, json: async () => ({ message: 'Code sent' }) })
+    .mockResolvedValueOnce({ ok: true, json: async () => ({ message: 'Email verified' }) });
+  global.fetch = fetchMock;
+
   render(<App />);
 
   fireEvent.click(screen.getByRole('button', { name: /forgot your password/i }));
   fireEvent.change(screen.getByLabelText(/email address/i), { target: { value: 'admin@easyprocure.com' } });
+  fireEvent.click(screen.getByRole('button', { name: /send code/i }));
+
+  expect(await screen.findByLabelText(/verification code/i)).toBeInTheDocument();
+  fireEvent.change(screen.getByLabelText(/verification code/i), { target: { value: '123456' } });
+  fireEvent.change(screen.getByLabelText(/^new password$/i), { target: { value: 'newpassword123' } });
+  fireEvent.change(screen.getByLabelText(/confirm new password/i), { target: { value: 'newpassword123' } });
   fireEvent.click(screen.getByRole('button', { name: /reset password/i }));
 
-  expect(screen.getByText(/password reset complete/i)).toBeInTheDocument();
+  expect(await screen.findByText(/password reset complete/i)).toBeInTheDocument();
+  expect(fetchMock).toHaveBeenCalledTimes(2);
 
   fireEvent.change(screen.getByLabelText(/login/i), { target: { value: 'admin@easyprocure.com' } });
-  fireEvent.change(screen.getByLabelText(/^password$/i), { target: { value: 'password123' } });
+  fireEvent.change(screen.getByLabelText(/^password$/i), { target: { value: 'newpassword123' } });
   fireEvent.click(screen.getByRole('button', { name: /sign in/i }));
 
   expect(screen.getByText(/Hi, Admin/i)).toBeInTheDocument();
+  if (originalFetch) global.fetch = originalFetch;
+  else delete global.fetch;
 });
 
 test('allows an authenticated user to add an inventory item', () => {
