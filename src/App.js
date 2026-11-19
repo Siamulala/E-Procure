@@ -1,30 +1,37 @@
 import React, { useState, useEffect } from "react";
-import { BrowserRouter as Router, Routes, Route, Navigate, Outlet } from "react-router-dom";
+import { BrowserRouter as Router, Routes, Route, Navigate, Outlet, useLocation } from "react-router-dom";
 import "./App.css";
 import Sidebar from "./components/Sidebar";
 import Navbar from "./components/Navbar";
-import Inventory from "./pages/Inventory";
+import InventoryDashboard from "./pages/InventoryDashboard";
+import InventorySubmenu from "./pages/InventorySubmenu";
+import InventoryStock from "./pages/InventoryStock";
+import PurchaseRequests from "./pages/PurchaseRequests";
+import Quotations from "./pages/Quotations";
+import SupplierInvoices from "./pages/SupplierInvoices";
 import Purchase from "./pages/Purchase";
 import Reporting from "./pages/Reporting";
 import Support from "./pages/Support";
 import Settings from "./pages/Settings";
-import Dashboard from "./pages/Dashboard";
 import Orders from "./pages/Orders";
 import CompanyLogin from "./pages/CompanyLogin";
 import Users from "./pages/Users";
 import TestFlows from "./pages/TestFlows";
 import AlwenOperations from "./pages/alwen/AlwenOperations";
 import AlwenFeatures from "./pages/alwen/AlwenFeatures";
+import AlwenAnalytics from "./pages/alwen/AlwenAnalytics";
+import { InventoryProvider, useInventory } from "./contexts/InventoryContext";
+import { canRoleViewMenu } from "./utils/menuAccess";
 import { alwenApiRequest, isAlwenApiConfigured } from "./services/alwenApi";
 
 function App() {
   const [user, setUser] = useState(null);
+  const [authReady, setAuthReady] = useState(false);
 
   const [orders, setOrders] = useState([]);
   const [inventory, setInventory] = useState([]);
   const [purchases, setPurchases] = useState([]);
   const [notifications, setNotifications] = useState([]);
-  const [inventorySearch, setInventorySearch] = useState("");
 
   useEffect(() => {
     const savedUser = localStorage.getItem("user");
@@ -50,6 +57,7 @@ function App() {
         setUser(restoredUser);
       }
     }
+    setAuthReady(true);
     setOrders(JSON.parse(localStorage.getItem("orders") || "[]"));
     setInventory(JSON.parse(localStorage.getItem("inventory") || "[]"));
     setPurchases(JSON.parse(localStorage.getItem("purchases") || "[]"));
@@ -118,41 +126,64 @@ function App() {
   };
 
   const RequireAuth = ({ user }) => {
+    const { pathname } = useLocation();
+    const { roleMenuPermissions } = useInventory();
+    if (!authReady) return null;
     if (!user) return <Navigate to="/login" replace />;
+    if (!canRoleViewMenu(user.role, pathname, roleMenuPermissions)) {
+      return (
+        <div className="page-card" role="alert">
+          <h1 className="page-title">Access restricted</h1>
+          <p className="page-subtitle">Your role does not have permission to view this menu. Contact an administrator if access is needed.</p>
+        </div>
+      );
+    }
     return <Outlet />;
   };
 
   return (
-    <Router future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
-      <div className="app-shell">
-        {user && <Sidebar user={user} />}
-        <div className={`main-shell ${user ? "main-shell--with-sidebar" : ""}`}>
-          {user && <Navbar user={user} onLogout={handleLogout} notifications={notifications} onSearch={setInventorySearch} />}
-          <main className={`main-content ${user ? "main-content--with-nav" : "main-content--auth"}`}>
-            <Routes>
-              <Route path="/" element={user ? <Navigate to="/dashboard" replace /> : <CompanyLogin onLogin={handleLogin} />} />
-              <Route path="/login" element={user ? <Navigate to="/dashboard" replace /> : <CompanyLogin onLogin={handleLogin} />} />
-              <Route path="/company-login" element={user ? <Navigate to="/dashboard" replace /> : <CompanyLogin onLogin={handleLogin} />} />
+    <InventoryProvider>
+      <Router future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+        <div className="app-shell">
+          {user && <Sidebar user={user} />}
+          <div className={`main-shell ${user ? "main-shell--with-sidebar" : ""}`}>
+            {user && <Navbar user={user} onLogout={handleLogout} notifications={notifications} />}
+            <main className={`main-content ${user ? "main-content--with-nav" : "main-content--auth"}`}>
+              <Routes>
+                <Route path="/" element={user ? <Navigate to="/dashboard" replace /> : <CompanyLogin onLogin={handleLogin} />} />
+                <Route path="/login" element={user ? <Navigate to="/dashboard" replace /> : <CompanyLogin onLogin={handleLogin} />} />
+                <Route path="/company-login" element={user ? <Navigate to="/dashboard" replace /> : <CompanyLogin onLogin={handleLogin} />} />
 
-              <Route element={<RequireAuth user={user} />}>
-                <Route path="/dashboard" element={user?.apiAuthenticated ? <AlwenOperations user={user} initialTab="requests" /> : <Dashboard user={user} orders={orders} inventory={inventory} purchases={purchases} />} />
-                <Route path="/alwen/:section" element={user?.apiAuthenticated ? <AlwenFeatures user={user} /> : <Navigate to="/dashboard" replace />} />
-                <Route path="/orders" element={user?.apiAuthenticated ? <AlwenOperations user={user} initialTab="orders" /> : <Orders orders={orders} setOrders={setOrders} user={user} />} />
-                <Route path="/inventory" element={user?.apiAuthenticated ? <AlwenOperations user={user} initialTab="stock" /> : <Inventory inventory={inventory} setInventory={setInventory} user={user} searchTerm={inventorySearch} />} />
-                <Route path="/purchase" element={user?.apiAuthenticated ? <AlwenOperations user={user} initialTab="requests" /> : <Purchase orders={orders} setOrders={setOrders} setInventory={setInventory} purchases={purchases} setPurchases={setPurchases} user={user} pushNotification={pushNotification} />} />
-                <Route path="/test" element={<TestFlows user={user} setUser={setUser} orders={orders} setOrders={setOrders} purchases={purchases} setPurchases={setPurchases} inventory={inventory} setInventory={setInventory} pushNotification={pushNotification} />} />
-                <Route path="/reporting" element={<Reporting orders={orders} purchases={purchases} inventory={inventory} />} />
-                <Route path="/support" element={<Support />} />
-                <Route path="/settings" element={<Settings user={user} setUser={setUser} />} />
-                <Route path="/users" element={<Users />} />
-              </Route>
+                <Route element={<RequireAuth user={user} />}>
+                  <Route path="/dashboard" element={<Navigate to="/inventory/dashboard" replace />} />
+                  <Route path="/alwen/reports" element={user?.apiAuthenticated ? <AlwenAnalytics user={user} /> : <Navigate to="/dashboard" replace />} />
+                  <Route path="/alwen/:section" element={user?.apiAuthenticated ? <AlwenFeatures user={user} /> : <Navigate to="/dashboard" replace />} />
+                  <Route path="/orders" element={user?.apiAuthenticated ? <AlwenOperations user={user} initialTab="orders" /> : <Orders orders={orders} setOrders={setOrders} user={user} />} />
+                  <Route path="/inventory" element={user?.apiAuthenticated ? <AlwenOperations user={user} initialTab="stock" /> : <InventoryStock user={user} />} />
+                  <Route path="/inventory/dashboard" element={user?.apiAuthenticated ? <AlwenAnalytics user={user} compact /> : <InventoryDashboard />} />
+                  <Route path="/inventory/suppliers" element={user?.apiAuthenticated ? <AlwenFeatures user={user} /> : <InventorySubmenu section="suppliers" />} />
+                  <Route path="/inventory/supplier-invoices" element={user?.apiAuthenticated ? <AlwenFeatures user={user} initialSection="invoices" /> : <SupplierInvoices />} />
+                  <Route path="/inventory/items" element={user?.apiAuthenticated ? <AlwenOperations user={user} initialTab="master" /> : <InventorySubmenu section="items" />} />
+                  <Route path="/inventory/purchase-requests" element={user?.apiAuthenticated ? <AlwenOperations user={user} initialTab="requests" /> : <PurchaseRequests />} />
+                  <Route path="/inventory/quotations" element={user?.apiAuthenticated ? <AlwenOperations user={user} initialTab="requests" /> : <Quotations />} />
+                  <Route path="/inventory/purchase-orders" element={user?.apiAuthenticated ? <AlwenOperations user={user} initialTab="orders" /> : <InventorySubmenu section="purchase-orders" />} />
+                  <Route path="/inventory/stock-in" element={user?.apiAuthenticated ? <AlwenOperations user={user} initialTab="orders" /> : <InventorySubmenu section="stock-in" />} />
+                  <Route path="/inventory/stock-out" element={user?.apiAuthenticated ? <AlwenOperations user={user} initialTab="stock" /> : <InventorySubmenu section="stock-out" />} />
+                  <Route path="/purchase" element={user?.apiAuthenticated ? <AlwenOperations user={user} initialTab="requests" /> : <Purchase orders={orders} setOrders={setOrders} setInventory={setInventory} purchases={purchases} setPurchases={setPurchases} user={user} pushNotification={pushNotification} />} />
+                  <Route path="/test" element={<TestFlows user={user} setUser={setUser} orders={orders} setOrders={setOrders} purchases={purchases} setPurchases={setPurchases} inventory={inventory} setInventory={setInventory} pushNotification={pushNotification} />} />
+                  <Route path="/reporting" element={user?.apiAuthenticated ? <Navigate to="/alwen/reports" replace /> : <Reporting />} />
+                  <Route path="/support" element={<Support />} />
+                  <Route path="/settings" element={<Settings user={user} setUser={setUser} />} />
+                  <Route path="/users" element={<Users />} />
+                </Route>
 
-              <Route path="*" element={<Navigate to={user ? "/dashboard" : "/login"} replace />} />
-            </Routes>
-          </main>
+                <Route path="*" element={<Navigate to={user ? "/dashboard" : "/login"} replace />} />
+              </Routes>
+            </main>
+          </div>
         </div>
-      </div>
-    </Router>
+      </Router>
+    </InventoryProvider>
   );
 }
 

@@ -11,3 +11,96 @@ code {
   font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
     monospace;
 }
+
+@media print {
+  @page {
+    margin: 14mm;
+  }
+
+  aside,
+  nav,
+  .no-print {
+    display: none !important;
+  }
+
+  body.voucher-open .page-content {
+    display: none !important;
+  }
+
+  body.voucher-open .voucher-backdrop {
+    position: static !important;
+    display: block !important;
+    padding: 0 !important;
+    background: #fff !important;
+  }
+
+  body.voucher-open .voucher-sheet {
+    width: 100% !important;
+    max-width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+  }
+
+  body,
+  #root,
+  .app-shell,
+  .main-shell,
+  .main-content,
+  main {
+    display: block !important;
+    background: #fff !important;
+    color: #111827 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    min-height: 0 !important;
+  }
+
+  .page-shell {
+    display: block !important;
+    gap: 12px !important;
+    animation: none !important;
+  }
+
+  .page-card {
+    box-shadow: none !important;
+    margin-bottom: 12px !important;
+  }
+
+  .print-header {
+    margin-bottom: 12px;
+  }
+
+  .dashboard-print-logo {
+    display: block !important;
+    width: 205px;
+    margin-bottom: 12px;
+  }
+
+  .print-header-date {
+    display: block !important;
+  }
+
+  table {
+    border-collapse: collapse;
+    width: 100%;
+  }
+
+  th,
+  td {
+    border: 1px solid #cbd5e1 !important;
+    padding: 8px !important;
+  }
+
+  thead {
+    display: table-header-group;
+  }
+
+  tr {
+    break-inside: avoid;
+  }
+}

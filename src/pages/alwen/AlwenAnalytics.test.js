@@ -4,6 +4,7 @@ import AlwenAnalytics from "./AlwenAnalytics";
 import { alwenApiDownload, alwenApiRequest } from "../../services/alwenApi";
 
 jest.mock("react-chartjs-2", () => ({
+  Line: () => null,
   Bar: () => null,
   Doughnut: () => null
 }));
@@ -31,7 +32,11 @@ const report = {
   project_spend: [{ project: "Kericho", value: "100.00", purchase_order_count: 1, share_percent: "100.00" }],
   category_spend: [],
   item_spend: [],
-  purchase_request_funnel: [],
+  purchase_request_funnel: [
+    { status: "Submitted", count: 2 },
+    { status: "Approved", count: 1 },
+    { status: "Rejected", count: 5 }
+  ],
   supplier_scorecard: [],
   price_history: [],
   stock: null,
@@ -54,8 +59,11 @@ test("loads analytics, applies report filters, and exports filtered CSV", async 
   render(<AlwenAnalytics user={{ role: "Finance", project_id: null }} />);
 
   expect(alwenApiRequest).toHaveBeenCalled();
-  expect(await screen.findByRole("heading", { name: "Analytics & reports" })).toBeInTheDocument();
+  expect(await screen.findByRole("heading", { name: "Procurement Spend Overview" })).toBeInTheDocument();
   expect(await screen.findByRole("heading", { name: "Supplier commitments" })).toBeInTheDocument();
+  expect(screen.getByText("Suppliers with commitments")).toBeInTheDocument();
+  expect(screen.getByText(/this dashboard does not represent paid expenditure/i)).toBeInTheDocument();
+  expect(screen.getByText("3")).toBeInTheDocument();
 
   fireEvent.change(screen.getByLabelText("Supplier"), { target: { value: "5" } });
   fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
@@ -70,4 +78,14 @@ test("loads analytics, applies report filters, and exports filtered CSV", async 
       "alwen-spend-by-month.csv"
     );
   });
+});
+
+test("compact dashboard keeps detailed procurement tables available on demand", async () => {
+  render(<AlwenAnalytics user={{ role: "Finance", project_id: null }} compact />);
+
+  expect(await screen.findByText("PO commitments")).toBeInTheDocument();
+  expect(screen.getByText("Supplier commitments")).not.toBeVisible();
+  fireEvent.click(screen.getByText("Detailed tables"));
+  expect(screen.getByRole("heading", { name: "Supplier commitments" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Download CSV" })).toBeInTheDocument();
 });

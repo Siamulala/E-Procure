@@ -99,6 +99,8 @@ export default function AlwenOperations({ user, initialTab = "requests" }) {
   const canReceive = ["Admin", "Procurement Officer", "Store Keeper"].includes(user.role);
   const canIssue = ["Admin", "Store Keeper"].includes(user.role);
   const canAdjust = canApprove;
+  const getItemUom = (itemId) => items.find((item) => String(item.id) === String(itemId))?.unit || "units";
+  const returnIssue = movements.find((movement) => String(movement.id) === stockForm.original_issue_id);
   const availableTabs = useMemo(() => (
     user.role === "Project Manager"
       ? ["master", "requests", "orders", "analytics"]
@@ -423,7 +425,7 @@ export default function AlwenOperations({ user, initialTab = "requests" }) {
                 <Field label="Item name"><input className="input-field" value={itemForm.name} onChange={(event) => setItemForm((current) => ({ ...current, name: event.target.value }))} required /></Field>
                 <Field label="SKU"><input className="input-field" value={itemForm.sku} onChange={(event) => setItemForm((current) => ({ ...current, sku: event.target.value }))} /></Field>
                 <Field label="Category"><select className="input-field" value={itemForm.category_id} onChange={(event) => setItemForm((current) => ({ ...current, category_id: event.target.value }))}><option value="">Select category</option>{categories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}</select></Field>
-                <Field label="Unit"><select className="input-field" value={itemForm.unit_id} onChange={(event) => setItemForm((current) => ({ ...current, unit_id: event.target.value }))}><option value="">Select unit</option>{units.map((unit) => <option key={unit.id} value={unit.id}>{unit.code}</option>)}</select></Field>
+                <Field label="Unit"><select className="input-field" value={itemForm.unit_id} onChange={(event) => setItemForm((current) => ({ ...current, unit_id: event.target.value }))} required><option value="">Select unit</option>{units.map((unit) => <option key={unit.id} value={unit.id}>{unit.code}</option>)}</select></Field>
                 <Field label="Reorder level"><input className="input-field" type="number" min="0" step="0.001" value={itemForm.reorder_level} onChange={(event) => setItemForm((current) => ({ ...current, reorder_level: event.target.value }))} /></Field>
                 <button className="primary-btn" type="submit" disabled={saving}>Save item</button>
               </form>
@@ -472,11 +474,11 @@ export default function AlwenOperations({ user, initialTab = "requests" }) {
                 <Field label="Description">
                   <input className="input-field" name="description" value={requestForm.description} onChange={updateRequestField} required />
                 </Field>
-                <Field label="Quantity">
+                <Field label={`Quantity (${units.find((unit) => String(unit.id) === requestForm.unit_id)?.code || "unit"})`}>
                   <input className="input-field" name="quantity" type="number" min="0.001" step="0.001" value={requestForm.quantity} onChange={updateRequestField} required />
                 </Field>
                 <Field label="Unit">
-                  <select className="input-field" name="unit_id" value={requestForm.unit_id} onChange={updateRequestField}>
+                  <select className="input-field" name="unit_id" value={requestForm.unit_id} onChange={updateRequestField} required>
                     <option value="">Select unit</option>
                     {units.map((unit) => <option key={unit.id} value={unit.id}>{unit.code}</option>)}
                   </select>
@@ -600,7 +602,7 @@ export default function AlwenOperations({ user, initialTab = "requests" }) {
                     setReceiptForm((current) => ({ ...current, purchase_order_line_id: event.target.value, unit_cost: line?.unit_price || "" }));
                   }} required>
                     <option value="">Select line</option>
-                    {selectedOrderLines.map((line) => <option key={line.id} value={line.id}>{line.description} — {line.quantity}</option>)}
+                    {selectedOrderLines.map((line) => <option key={line.id} value={line.id}>{line.description} — {line.quantity} {getItemUom(line.item_id)}</option>)}
                   </select>
                 </Field>
                 <Field label="Store">
@@ -609,7 +611,7 @@ export default function AlwenOperations({ user, initialTab = "requests" }) {
                     {stores.map((store) => <option key={store.id} value={store.id}>{store.name}</option>)}
                   </select>
                 </Field>
-                <Field label={`Quantity (ordered ${selectedReceiptLine?.quantity || "—"})`}>
+                <Field label={`Quantity (${getItemUom(selectedReceiptLine?.item_id)}; ordered ${selectedReceiptLine?.quantity || "—"})`}>
                   <input className="input-field" type="number" min="0.001" step="0.001" value={receiptForm.quantity} onChange={(event) => setReceiptForm((current) => ({ ...current, quantity: event.target.value }))} required />
                 </Field>
                 <Field label="Unit cost (KES)">
@@ -661,9 +663,9 @@ export default function AlwenOperations({ user, initialTab = "requests" }) {
             <form onSubmit={submitStockAction} className="form-row" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))" }}>
               {stockAction === "issue" ? (
                 <>
-                  <Field label="Item"><select className="input-field" value={stockForm.item_id} onChange={(event) => setStockForm((current) => ({ ...current, item_id: event.target.value }))} required><option value="">Select item</option>{items.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></Field>
+                  <Field label="Item"><select className="input-field" value={stockForm.item_id} onChange={(event) => setStockForm((current) => ({ ...current, item_id: event.target.value }))} required><option value="">Select item</option>{items.map((item) => <option key={item.id} value={item.id}>{item.name} ({item.unit || "units"})</option>)}</select></Field>
                   <Field label="Store"><select className="input-field" value={stockForm.store_id} onChange={(event) => setStockForm((current) => ({ ...current, store_id: event.target.value }))} required><option value="">Select store</option>{stores.map((store) => <option key={store.id} value={store.id}>{store.name}</option>)}</select></Field>
-                  <Field label="Quantity"><input className="input-field" type="number" min="0.001" step="0.001" value={stockForm.quantity} onChange={(event) => setStockForm((current) => ({ ...current, quantity: event.target.value }))} required /></Field>
+                  <Field label={`Quantity (${getItemUom(stockForm.item_id)})`}><input className="input-field" type="number" min="0.001" step="0.001" value={stockForm.quantity} onChange={(event) => setStockForm((current) => ({ ...current, quantity: event.target.value }))} required /></Field>
                   <Field label="Project"><select className="input-field" value={stockForm.project_id} onChange={(event) => setStockForm((current) => ({ ...current, project_id: event.target.value }))}><option value="">Select project</option>{projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}</select></Field>
                   <Field label="Received by"><select className="input-field" value={stockForm.staff_id} onChange={(event) => setStockForm((current) => ({ ...current, staff_id: event.target.value }))}><option value="">Select staff</option>{staff.map((person) => <option key={person.id} value={person.id}>{person.name}</option>)}</select></Field>
                   <Field label="Purpose"><input className="input-field" value={stockForm.purpose} onChange={(event) => setStockForm((current) => ({ ...current, purpose: event.target.value }))} required /></Field>
@@ -671,25 +673,25 @@ export default function AlwenOperations({ user, initialTab = "requests" }) {
               ) : null}
               {stockAction === "return" ? (
                 <>
-                  <Field label="Original issue"><select className="input-field" value={stockForm.original_issue_id} onChange={(event) => setStockForm((current) => ({ ...current, original_issue_id: event.target.value }))} required><option value="">Select issue</option>{movements.filter((movement) => movement.movement_type === "Issue").map((movement) => <option key={movement.id} value={movement.id}>#{movement.id} — {items.find((item) => item.id === movement.item_id)?.name} ({movement.quantity})</option>)}</select></Field>
-                  <Field label="Quantity"><input className="input-field" type="number" min="0.001" step="0.001" value={stockForm.quantity} onChange={(event) => setStockForm((current) => ({ ...current, quantity: event.target.value }))} required /></Field>
+                  <Field label="Original issue"><select className="input-field" value={stockForm.original_issue_id} onChange={(event) => setStockForm((current) => ({ ...current, original_issue_id: event.target.value }))} required><option value="">Select issue</option>{movements.filter((movement) => movement.movement_type === "Issue").map((movement) => <option key={movement.id} value={movement.id}>#{movement.id} — {items.find((item) => item.id === movement.item_id)?.name} ({movement.quantity} {getItemUom(movement.item_id)})</option>)}</select></Field>
+                  <Field label={`Quantity (${getItemUom(returnIssue?.item_id)})`}><input className="input-field" type="number" min="0.001" step="0.001" value={stockForm.quantity} onChange={(event) => setStockForm((current) => ({ ...current, quantity: event.target.value }))} required /></Field>
                   <Field label="Reason"><input className="input-field" value={stockForm.reason} onChange={(event) => setStockForm((current) => ({ ...current, reason: event.target.value }))} required /></Field>
                 </>
               ) : null}
               {stockAction === "transfer" ? (
                 <>
-                  <Field label="Item"><select className="input-field" value={stockForm.item_id} onChange={(event) => setStockForm((current) => ({ ...current, item_id: event.target.value }))} required><option value="">Select item</option>{items.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></Field>
+                  <Field label="Item"><select className="input-field" value={stockForm.item_id} onChange={(event) => setStockForm((current) => ({ ...current, item_id: event.target.value }))} required><option value="">Select item</option>{items.map((item) => <option key={item.id} value={item.id}>{item.name} ({item.unit || "units"})</option>)}</select></Field>
                   <Field label="From store"><select className="input-field" value={stockForm.from_store_id} onChange={(event) => setStockForm((current) => ({ ...current, from_store_id: event.target.value }))} required><option value="">Select store</option>{stores.map((store) => <option key={store.id} value={store.id}>{store.name}</option>)}</select></Field>
                   <Field label="To store"><select className="input-field" value={stockForm.to_store_id} onChange={(event) => setStockForm((current) => ({ ...current, to_store_id: event.target.value }))} required><option value="">Select store</option>{stores.map((store) => <option key={store.id} value={store.id}>{store.name}</option>)}</select></Field>
-                  <Field label="Quantity"><input className="input-field" type="number" min="0.001" step="0.001" value={stockForm.quantity} onChange={(event) => setStockForm((current) => ({ ...current, quantity: event.target.value }))} required /></Field>
+                  <Field label={`Quantity (${getItemUom(stockForm.item_id)})`}><input className="input-field" type="number" min="0.001" step="0.001" value={stockForm.quantity} onChange={(event) => setStockForm((current) => ({ ...current, quantity: event.target.value }))} required /></Field>
                   <Field label="Reason"><input className="input-field" value={stockForm.reason} onChange={(event) => setStockForm((current) => ({ ...current, reason: event.target.value }))} required /></Field>
                 </>
               ) : null}
               {stockAction === "adjust" ? (
                 <>
-                  <Field label="Item"><select className="input-field" value={stockForm.item_id} onChange={(event) => setStockForm((current) => ({ ...current, item_id: event.target.value }))} required><option value="">Select item</option>{items.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></Field>
+                  <Field label="Item"><select className="input-field" value={stockForm.item_id} onChange={(event) => setStockForm((current) => ({ ...current, item_id: event.target.value }))} required><option value="">Select item</option>{items.map((item) => <option key={item.id} value={item.id}>{item.name} ({item.unit || "units"})</option>)}</select></Field>
                   <Field label="Store"><select className="input-field" value={stockForm.store_id} onChange={(event) => setStockForm((current) => ({ ...current, store_id: event.target.value }))} required><option value="">Select store</option>{stores.map((store) => <option key={store.id} value={store.id}>{store.name}</option>)}</select></Field>
-                  <Field label="Quantity change"><input className="input-field" type="number" step="0.001" value={stockForm.quantity_delta} onChange={(event) => setStockForm((current) => ({ ...current, quantity_delta: event.target.value }))} required /></Field>
+                  <Field label={`Quantity change (${getItemUom(stockForm.item_id)})`}><input className="input-field" type="number" step="0.001" value={stockForm.quantity_delta} onChange={(event) => setStockForm((current) => ({ ...current, quantity_delta: event.target.value }))} required /></Field>
                   <Field label="Reason"><input className="input-field" value={stockForm.reason} onChange={(event) => setStockForm((current) => ({ ...current, reason: event.target.value }))} required /></Field>
                 </>
               ) : null}
@@ -699,8 +701,8 @@ export default function AlwenOperations({ user, initialTab = "requests" }) {
           <section className="page-card" style={{ overflowX: "auto", marginBottom: 16 }}>
             <h2 className="panel-title">Current stock</h2>
             <table className="data-table">
-              <thead><tr><th>Item</th><th>Store</th><th>Quantity</th><th>Average cost</th><th>Stock value</th></tr></thead>
-              <tbody>{balances.map((balance) => <tr key={`${balance.item_id}-${balance.store_id}`}><td>{balance.item}</td><td>{balance.store}</td><td>{balance.quantity}</td><td>{formatKES(balance.average_unit_cost)}</td><td>{formatKES(balance.stock_value)}</td></tr>)}
+              <thead><tr><th>Item</th><th>Store</th><th>Quantity (UOM)</th><th>Average cost</th><th>Stock value</th></tr></thead>
+              <tbody>{balances.map((balance) => <tr key={`${balance.item_id}-${balance.store_id}`}><td>{balance.item}</td><td>{balance.store}</td><td>{balance.quantity} {getItemUom(balance.item_id)}</td><td>{formatKES(balance.average_unit_cost)}</td><td>{formatKES(balance.stock_value)}</td></tr>)}
                 {!balances.length ? <tr><td colSpan="5">No stock balances recorded.</td></tr> : null}
               </tbody>
             </table>
@@ -709,7 +711,7 @@ export default function AlwenOperations({ user, initialTab = "requests" }) {
             <h2 className="panel-title">Recent stock ledger</h2>
             <table className="data-table">
               <thead><tr><th>Date</th><th>Item</th><th>Store</th><th>Movement</th><th>Quantity</th><th>Purpose / reason</th></tr></thead>
-              <tbody>{movements.map((movement) => <tr key={movement.id}><td>{formatDate(movement.movement_date)}</td><td>{items.find((item) => item.id === movement.item_id)?.name || movement.item_id}</td><td>{stores.find((store) => store.id === movement.store_id)?.name || movement.store_id}</td><td>{movement.movement_type}</td><td>{movement.quantity}</td><td>{movement.purpose || movement.reason || "—"}</td></tr>)}
+              <tbody>{movements.map((movement) => <tr key={movement.id}><td>{formatDate(movement.movement_date)}</td><td>{items.find((item) => item.id === movement.item_id)?.name || movement.item_id}</td><td>{stores.find((store) => store.id === movement.store_id)?.name || movement.store_id}</td><td>{movement.movement_type}</td><td>{movement.quantity} {getItemUom(movement.item_id)}</td><td>{movement.purpose || movement.reason || "—"}</td></tr>)}
                 {!movements.length ? <tr><td colSpan="6">No stock movements recorded.</td></tr> : null}
               </tbody>
             </table>

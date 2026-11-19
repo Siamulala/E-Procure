@@ -1,140 +1,274 @@
-import React, { useState } from "react";
+import React, { useMemo, useState } from "react";
+import PrintHeader from "../components/PrintHeader";
+import { useInventory } from "../contexts/InventoryContext";
+import { formatKsh } from "../utils/currency";
 import "../styles/Pages.css";
 
-export default function Reporting({ orders = [], purchases = [], inventory = [] }) {
+const reportTabs = [
+  { id: "summary", label: "Summary" },
+  { id: "requests", label: "Purchase Requests" },
+  { id: "quotations", label: "Purchase Quotations" },
+  { id: "purchase-orders", label: "Purchase Orders" },
+  { id: "inventory", label: "Inventory" },
+  { id: "suppliers", label: "Suppliers" },
+];
+
+const numberOrZero = (value) => Number(value) || 0;
+
+function getStatusCounts(records) {
+  return records.reduce((counts, record) => {
+    const status = record.status || "Unknown";
+    counts[status] = (counts[status] || 0) + 1;
+    return counts;
+  }, {});
+}
+
+function getLineTotal(lines, priceKey) {
+  return lines.reduce(
+    (total, line) => total + numberOrZero(line.quantity) * numberOrZero(line[priceKey]),
+    0
+  );
+}
+
+export default function Reporting() {
+  const { suppliers, items, purchaseRequests, quotations, purchaseOrders } = useInventory();
   const [reportType, setReportType] = useState("summary");
 
-  const purchaseStats = {
-    total: purchases.length,
-    pending: purchases.filter(p => p.status === "Pending").length,
-    approved: purchases.filter(p => p.status === "Approved").length,
-    purchased: purchases.filter(p => p.status === "Purchased").length
-  };
+  const itemById = useMemo(() => new Map(items.map((item) => [item.id, item])), [items]);
+  const supplierById = useMemo(() => new Map(suppliers.map((supplier) => [supplier.id, supplier])), [suppliers]);
+  const activeItems = items.filter((item) => !item.archived);
+  const inventoryValue = items.reduce(
+    (sum, item) => sum + numberOrZero(item.stock) * numberOrZero(item.unitCost),
+    0
+  );
+  const lowStockCount = activeItems.filter(
+    (item) => numberOrZero(item.stock) <= numberOrZero(item.reorderLevel)
+  ).length;
+  const committedSpend = purchaseOrders
+    .filter((order) => order.status !== "Cancelled")
+    .reduce((sum, order) => sum + getLineTotal(order.lineItems, "unitCost"), 0);
+  const requestStatuses = getStatusCounts(purchaseRequests);
+  const quotationStatuses = getStatusCounts(quotations);
+  const purchaseOrderStatuses = getStatusCounts(purchaseOrders);
 
-  const orderStats = {
-    total: orders.length,
-    pending: orders.filter(o => o.status === "Pending").length,
-    approved: orders.filter(o => o.status === "Approved").length,
-    fulfilled: orders.filter(o => o.status === "Fulfilled").length
-  };
-
-  const inventoryStats = {
-    totalItems: inventory.length,
-    totalValue: inventory.reduce((sum, i) => sum + ((parseFloat(i.amount) || 0) * i.quantity), 0)
-  };
-
-  const printReport = () => {
-    const w = window.open("", "_blank");
-    const html = `
-      <html><head><title>Operations Report</title><style>body{font-family:Arial;margin:20px}table{width:100%;border-collapse:collapse;margin:20px 0}th,td{border:1px solid #ddd;padding:10px;text-align:left}th{background:#f0f0f0}.summary{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:10px;margin:20px 0}.stat{background:#f5f5f5;padding:15px;border-radius:5px;text-align:center}h2{margin-top:30px}</style></head><body>
-      <h1>Operations Report</h1>
-      <p>Generated: ${new Date().toLocaleString()}</p>
-      <div class="summary">
-        <div class="stat"><h3>${purchaseStats.total}</h3><p>Total Purchases</p></div>
-        <div class="stat"><h3>${orderStats.total}</h3><p>Total Orders</p></div>
-        <div class="stat"><h3>${inventory.length}</h3><p>Items</p></div>
-        <div class="stat"><h3>$${inventoryStats.totalValue.toFixed(2)}</h3><p>Inventory Value</p></div>
+  const renderItemLines = (lines, priceKey) => lines.map((line, index) => {
+    const item = itemById.get(line.itemId);
+    const quantity = numberOrZero(line.quantity);
+    return (
+      <div key={`${line.itemId}-${index}`}>
+        {quantity} × {item?.name || "Unknown item"}
+        {priceKey ? ` @ ${formatKsh(line[priceKey], true)}` : ""}
       </div>
-      <h2>Details</h2>
-      <p>See below for detailed statistics and information.</p>
-      <button onclick="window.print()" style="margin-top:20px;padding:10px 20px">Print</button>
-      </body></html>
-    `;
-    w.document.write(html);
-  };
+    );
+  });
 
   return (
-    <div className="page-container">
-      <div className="page-header">
-        <h1>Reporting & Analytics</h1>
-        <p>Comprehensive insights on purchases, orders, and inventory.</p>
+    <div className="page-shell">
+      <PrintHeader
+        title="Reporting & Analytics"
+        subtitle="Live reports from inventory, purchase requests, supplier quotations, and purchase orders."
+      />
+
+      <div className="report-tabs no-print" role="group" aria-label="Report sections">
+        {reportTabs.map((tab) => (
+          <button
+            key={tab.id}
+            type="button"
+            className={`secondary-btn ${reportType === tab.id ? "report-tab--active" : ""}`}
+            aria-pressed={reportType === tab.id}
+            onClick={() => setReportType(tab.id)}
+          >
+            {tab.label}
+          </button>
+        ))}
       </div>
 
-      <div style={{ marginBottom: "20px", display: "flex", gap: "10px" }}>
-        <button onClick={() => setReportType("summary")} style={{ padding: "10px 20px", backgroundColor: reportType === "summary" ? "#1d4ed8" : "#ddd", color: reportType === "summary" ? "#fff" : "#000", border: "none", borderRadius: "5px", cursor: "pointer" }}>Summary</button>
-        <button onClick={() => setReportType("purchases")} style={{ padding: "10px 20px", backgroundColor: reportType === "purchases" ? "#1d4ed8" : "#ddd", color: reportType === "purchases" ? "#fff" : "#000", border: "none", borderRadius: "5px", cursor: "pointer" }}>Purchases</button>
-        <button onClick={() => setReportType("orders")} style={{ padding: "10px 20px", backgroundColor: reportType === "orders" ? "#1d4ed8" : "#ddd", color: reportType === "orders" ? "#fff" : "#000", border: "none", borderRadius: "5px", cursor: "pointer" }}>Orders</button>
-        <button onClick={() => setReportType("inventory")} style={{ padding: "10px 20px", backgroundColor: reportType === "inventory" ? "#1d4ed8" : "#ddd", color: reportType === "inventory" ? "#fff" : "#000", border: "none", borderRadius: "5px", cursor: "pointer" }}>Inventory</button>
-        <button onClick={printReport} style={{ padding: "10px 20px", backgroundColor: "#16a34a", color: "#fff", border: "none", borderRadius: "5px", cursor: "pointer", marginLeft: "auto" }}>📄 Print</button>
-      </div>
-
-      {reportType === "summary" && (
-        <div>
-          <h2 style={{ marginBottom: "20px" }}>Operations Summary</h2>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "15px", marginBottom: "30px" }}>
-            <div style={{ background: "#fff", padding: "20px", borderRadius: "8px", boxShadow: "0 2px 4px rgba(0,0,0,0.1)", textAlign: "center" }}>
-              <h3 style={{ color: "#1d4ed8", marginBottom: "10px" }}>{purchaseStats.total}</h3>
-              <p>Total Purchases</p>
-            </div>
-            <div style={{ background: "#fff", padding: "20px", borderRadius: "8px", boxShadow: "0 2px 4px rgba(0,0,0,0.1)", textAlign: "center" }}>
-              <h3 style={{ color: "#16a34a", marginBottom: "10px" }}>{purchaseStats.approved}</h3>
-              <p>Approved</p>
-            </div>
-            <div style={{ background: "#fff", padding: "20px", borderRadius: "8px", boxShadow: "0 2px 4px rgba(0,0,0,0.1)", textAlign: "center" }}>
-              <h3 style={{ color: "#2196f3", marginBottom: "10px" }}>{orderStats.total}</h3>
-              <p>Total Orders</p>
-            </div>
-            <div style={{ background: "#fff", padding: "20px", borderRadius: "8px", boxShadow: "0 2px 4px rgba(0,0,0,0.1)", textAlign: "center" }}>
-              <h3 style={{ color: "#ff9800", marginBottom: "10px" }}>${inventoryStats.totalValue.toFixed(2)}</h3>
-              <p>Inventory Value</p>
-            </div>
+      {reportType === "summary" ? (
+        <>
+          <div className="page-grid page-grid--cards">
+            <section className="page-card">
+              <p className="stat-title">Purchase Requests</p>
+              <strong className="stat-value">{purchaseRequests.length}</strong>
+              <p className="panel-copy">{requestStatuses["Pending Approval"] || 0} pending approval</p>
+            </section>
+            <section className="page-card">
+              <p className="stat-title">Purchase Quotations</p>
+              <strong className="stat-value">{quotations.length}</strong>
+              <p className="panel-copy">{quotationStatuses.Submitted || 0} awaiting selection</p>
+            </section>
+            <section className="page-card">
+              <p className="stat-title">Purchase Orders</p>
+              <strong className="stat-value">{purchaseOrders.length}</strong>
+              <p className="panel-copy">{purchaseOrderStatuses.Pending || 0} pending receipt</p>
+            </section>
+            <section className="page-card">
+              <p className="stat-title">Inventory Value</p>
+              <strong className="stat-value">{formatKsh(inventoryValue)}</strong>
+              <p className="panel-copy">{lowStockCount} active items at or below reorder level</p>
+            </section>
           </div>
-          <h3>Purchase Distribution</h3>
-          <table border="1" cellPadding="10" style={{ width: "100%", background: "#fff", marginBottom: "20px" }}>
-            <thead style={{ backgroundColor: "#f0f0f0" }}><tr><th>Status</th><th>Count</th><th>%</th></tr></thead>
-            <tbody>
-              <tr><td>Pending</td><td>{purchaseStats.pending}</td><td>{((purchaseStats.pending / (purchaseStats.total || 1)) * 100).toFixed(1)}%</td></tr>
-              <tr><td>Approved</td><td>{purchaseStats.approved}</td><td>{((purchaseStats.approved / (purchaseStats.total || 1)) * 100).toFixed(1)}%</td></tr>
-              <tr><td>Purchased</td><td>{purchaseStats.purchased}</td><td>{((purchaseStats.purchased / (purchaseStats.total || 1)) * 100).toFixed(1)}%</td></tr>
-            </tbody>
-          </table>
-          <h3>Order Distribution</h3>
-          <table border="1" cellPadding="10" style={{ width: "100%", background: "#fff" }}>
-            <thead style={{ backgroundColor: "#f0f0f0" }}><tr><th>Status</th><th>Count</th><th>%</th></tr></thead>
-            <tbody>
-              <tr><td>Pending</td><td>{orderStats.pending}</td><td>{((orderStats.pending / (orderStats.total || 1)) * 100).toFixed(1)}%</td></tr>
-              <tr><td>Approved</td><td>{orderStats.approved}</td><td>{((orderStats.approved / (orderStats.total || 1)) * 100).toFixed(1)}%</td></tr>
-              <tr><td>Fulfilled</td><td>{orderStats.fulfilled}</td><td>{((orderStats.fulfilled / (orderStats.total || 1)) * 100).toFixed(1)}%</td></tr>
-            </tbody>
-          </table>
-        </div>
-      )}
 
-      {reportType === "purchases" && (
-        <div>
-          <h2>Purchase Requests</h2>
-          <table border="1" cellPadding="10" style={{ width: "100%", background: "#fff" }}>
-            <thead style={{ backgroundColor: "#f0f0f0" }}><tr><th>Item</th><th>Qty</th><th>Suppliers</th><th>Status</th><th>Date</th></tr></thead>
-            <tbody>
-              {purchases.length > 0 ? purchases.map((p, i) => <tr key={i}><td>{p.item}</td><td>{p.quantity}</td><td>{p.suppliers?.length || 0}</td><td>{p.status}</td><td>{p.date}</td></tr>) : <tr><td colSpan="5">No data</td></tr>}
-            </tbody>
-          </table>
-        </div>
-      )}
+          <section className="page-card">
+            <h2 className="panel-title">Procurement workflow status</h2>
+            <p className="panel-copy">Counts update as requests, quotations, and orders change in their respective sections.</p>
+            <div className="table-scroll">
+              <table className="data-table">
+                <thead><tr><th>Workflow</th><th>Status</th><th>Records</th></tr></thead>
+                <tbody>
+                  {[
+                    ...Object.entries(requestStatuses).map(([status, count]) => ({ workflow: "Purchase Requests", status, count })),
+                    ...Object.entries(quotationStatuses).map(([status, count]) => ({ workflow: "Purchase Quotations", status, count })),
+                    ...Object.entries(purchaseOrderStatuses).map(([status, count]) => ({ workflow: "Purchase Orders", status, count })),
+                  ].map((row) => (
+                    <tr key={`${row.workflow}-${row.status}`}>
+                      <td>{row.workflow}</td><td>{row.status}</td><td>{row.count}</td>
+                    </tr>
+                  ))}
+                  {!purchaseRequests.length && !quotations.length && !purchaseOrders.length ? (
+                    <tr><td colSpan="3">No procurement activity found.</td></tr>
+                  ) : null}
+                </tbody>
+              </table>
+            </div>
+            <p className="panel-copy report-total">Committed purchase-order spend: <strong>{formatKsh(committedSpend)}</strong></p>
+          </section>
+        </>
+      ) : null}
 
-      {reportType === "orders" && (
-        <div>
-          <h2>Orders</h2>
-          <table border="1" cellPadding="10" style={{ width: "100%", background: "#fff" }}>
-            <thead style={{ backgroundColor: "#f0f0f0" }}><tr><th>Department</th><th>Item</th><th>Qty</th><th>Supplier</th><th>Status</th><th>Date</th></tr></thead>
-            <tbody>
-              {orders.length > 0 ? orders.map((o, i) => <tr key={i}><td>{o.department}</td><td>{o.item}</td><td>{o.quantity}</td><td>{o.supplier}</td><td>{o.status}</td><td>{o.date}</td></tr>) : <tr><td colSpan="6">No data</td></tr>}
-            </tbody>
-          </table>
-        </div>
-      )}
+      {reportType === "requests" ? (
+        <section className="page-card">
+          <h2 className="panel-title">Purchase request register</h2>
+          <div className="table-scroll">
+            <table className="data-table">
+              <thead><tr><th>Request</th><th>Requester / department</th><th>Items</th><th>Estimated value</th><th>Status</th><th>Date</th></tr></thead>
+              <tbody>
+                {purchaseRequests.map((request) => (
+                  <tr key={request.id}>
+                    <td>{request.id}</td>
+                    <td>{request.requestedBy}<div className="panel-copy">{request.department}</div></td>
+                    <td>{renderItemLines(request.lineItems)}</td>
+                    <td>{formatKsh(request.lineItems.reduce((sum, line) => {
+                      const item = itemById.get(line.itemId);
+                      return sum + numberOrZero(item?.unitCost) * numberOrZero(line.quantity);
+                    }, 0), true)}</td>
+                    <td>{request.status}</td>
+                    <td>{request.date}</td>
+                  </tr>
+                ))}
+                {!purchaseRequests.length ? <tr><td colSpan="6">No purchase requests found.</td></tr> : null}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      ) : null}
 
-      {reportType === "inventory" && (
-        <div>
-          <h2>Inventory - Top 20 by Value</h2>
-          <table border="1" cellPadding="10" style={{ width: "100%", background: "#fff" }}>
-            <thead style={{ backgroundColor: "#f0f0f0" }}><tr><th>Item</th><th>Qty</th><th>Price</th><th>Total</th><th>Supplier</th></tr></thead>
-            <tbody>
-              {inventory.length > 0 ? inventory.sort((a, b) => ((parseFloat(b.amount) || 0) * b.quantity) - ((parseFloat(a.amount) || 0) * a.quantity)).slice(0, 20).map((i, idx) => <tr key={idx}><td>{i.item}</td><td>{i.quantity}</td><td>${(parseFloat(i.amount) || 0).toFixed(2)}</td><td>${((parseFloat(i.amount) || 0) * i.quantity).toFixed(2)}</td><td>{i.supplier}</td></tr>) : <tr><td colSpan="5">No data</td></tr>}
-            </tbody>
-          </table>
-        </div>
-      )}
+      {reportType === "quotations" ? (
+        <section className="page-card">
+          <h2 className="panel-title">Purchase quotation register</h2>
+          <div className="table-scroll">
+            <table className="data-table">
+              <thead><tr><th>Quotation</th><th>Request</th><th>Supplier</th><th>Quoted items</th><th>Total quote</th><th>Valid until</th><th>Status</th></tr></thead>
+              <tbody>
+                {quotations.map((quotation) => (
+                  <tr key={quotation.id}>
+                    <td>{quotation.id}</td>
+                    <td>{quotation.prId || "Direct"}</td>
+                    <td>{supplierById.get(quotation.supplierId)?.name || "Unknown supplier"}</td>
+                    <td>{renderItemLines(quotation.lineItems, "quotedUnitCost")}</td>
+                    <td>{formatKsh(getLineTotal(quotation.lineItems, "quotedUnitCost"), true)}</td>
+                    <td>{quotation.validUntil}</td>
+                    <td>{quotation.status}</td>
+                  </tr>
+                ))}
+                {!quotations.length ? <tr><td colSpan="7">No purchase quotations found.</td></tr> : null}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      ) : null}
+
+      {reportType === "purchase-orders" ? (
+        <section className="page-card">
+          <h2 className="panel-title">Purchase order register</h2>
+          <div className="table-scroll">
+            <table className="data-table">
+              <thead><tr><th>Purchase order</th><th>Supplier</th><th>Items</th><th>Total</th><th>Status</th><th>Date</th></tr></thead>
+              <tbody>
+                {purchaseOrders.map((order) => (
+                  <tr key={order.id}>
+                    <td>{order.orderNumber || order.id}</td>
+                    <td>{supplierById.get(order.supplierId)?.name || "Unknown supplier"}</td>
+                    <td>{renderItemLines(order.lineItems)}</td>
+                    <td>{formatKsh(getLineTotal(order.lineItems, "unitCost"), true)}</td>
+                    <td>{order.status}</td>
+                    <td>{order.date}</td>
+                  </tr>
+                ))}
+                {!purchaseOrders.length ? <tr><td colSpan="6">No purchase orders found.</td></tr> : null}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      ) : null}
+
+      {reportType === "inventory" ? (
+        <section className="page-card">
+          <h2 className="panel-title">Inventory valuation</h2>
+          <div className="table-scroll">
+            <table className="data-table">
+              <thead><tr><th>SKU</th><th>Item</th><th>Category</th><th>Stock (UOM)</th><th>Reorder level (UOM)</th><th>Unit cost</th><th>Stock value</th><th>Status</th></tr></thead>
+              <tbody>
+                {items.map((item) => {
+                  const stock = numberOrZero(item.stock);
+                  return (
+                    <tr key={item.id}>
+                      <td>{item.sku}</td>
+                      <td>{item.name}</td>
+                      <td>{item.category || "General Materials"}</td>
+                      <td>{stock} {item.uom}</td>
+                      <td>{item.reorderLevel} {item.uom}</td>
+                      <td>{formatKsh(item.unitCost, true)}</td>
+                      <td>{formatKsh(stock * numberOrZero(item.unitCost), true)}</td>
+                      <td>{item.archived ? "Archived" : "Active"}</td>
+                    </tr>
+                  );
+                })}
+                {!items.length ? <tr><td colSpan="8">No inventory items found.</td></tr> : null}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      ) : null}
+
+      {reportType === "suppliers" ? (
+        <section className="page-card">
+          <h2 className="panel-title">Supplier register</h2>
+          <div className="table-scroll">
+            <table className="data-table">
+              <thead><tr><th>Supplier</th><th>Email</th><th>Purchase orders</th><th>Committed spend</th><th>Lead time</th><th>Payment terms</th></tr></thead>
+              <tbody>
+                {suppliers.map((supplier) => {
+                  const orders = purchaseOrders.filter((order) => order.supplierId === supplier.id);
+                  const spend = orders
+                    .filter((order) => order.status !== "Cancelled")
+                    .reduce((sum, order) => sum + getLineTotal(order.lineItems, "unitCost"), 0);
+                  return (
+                    <tr key={supplier.id}>
+                      <td>{supplier.name}</td>
+                      <td>{supplier.email || "—"}</td>
+                      <td>{orders.length}</td>
+                      <td>{formatKsh(spend, true)}</td>
+                      <td>{supplier.leadTimeDays ?? "—"} days</td>
+                      <td>{supplier.paymentTerms || "—"}</td>
+                    </tr>
+                  );
+                })}
+                {!suppliers.length ? <tr><td colSpan="6">No suppliers found.</td></tr> : null}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      ) : null}
     </div>
   );
 }

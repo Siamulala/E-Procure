@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import PrintHeader from "../components/PrintHeader";
 import "../styles/Pages.css";
 
 const readStoredList = (key, fallback = []) => {
@@ -198,16 +199,10 @@ export default function Inventory({ inventory, setInventory, user, searchTerm = 
 
   return (
     <div className="page-shell">
-      <div className="page-header">
-        <div>
-          <p className="page-eyebrow">Inventory workspace</p>
-          <h1 className="page-title">Inventory</h1>
-          <p className="page-subtitle">Manage stock entries, suppliers, categories, and materials from one place.</p>
-        </div>
-        <div className="soft-pill">{inventory.length} active items</div>
-      </div>
+      <PrintHeader title="Inventory" subtitle="Manage stock entries, suppliers, categories, and materials from one place." />
+      <div className="soft-pill no-print">{inventory.length} active items</div>
 
-      <div className="page-card" style={{ marginBottom: "16px" }}>
+      <div className="page-card no-print" style={{ marginBottom: "16px" }}>
         <div className="panel-heading" style={{ marginBottom: "10px" }}>
           <h2 className="panel-title">Inventory modules</h2>
           <span style={{ color: feedback.includes("Added") ? "#15803d" : feedback ? "#b91c1c" : "#64748b" }}>{feedback || "Switch between inventory and its supporting reference modules."}</span>
@@ -291,7 +286,7 @@ export default function Inventory({ inventory, setInventory, user, searchTerm = 
         )}
       </div>
 
-      <div className="page-header" style={{ marginBottom: "10px" }}>
+      <div className="page-header no-print" style={{ marginBottom: "10px" }}>
         <div className="panel-copy">{selectedItems.size > 0 ? `${selectedItems.size} item(s) selected` : "Select one or more rows to act on them."}</div>
         {selectedItems.size > 0 && (
           <div style={{ position: "relative" }}>
@@ -315,7 +310,7 @@ export default function Inventory({ inventory, setInventory, user, searchTerm = 
         <table style={{ width: "100%", borderCollapse: "collapse" }}>
           <thead style={{ backgroundColor: "#f8fafc" }}>
             <tr>
-              <th style={{ width: "40px", textAlign: "left", padding: "10px" }}><input type="checkbox" checked={selectedItems.size === inventory.length && inventory.length > 0} onChange={toggleSelectAll} /></th>
+              <th className="no-print" style={{ width: "40px", textAlign: "left", padding: "10px" }}><input type="checkbox" checked={selectedItems.size === inventory.length && inventory.length > 0} onChange={toggleSelectAll} /></th>
               <th style={{ textAlign: "left", padding: "10px" }}>No.</th>
               <th style={{ textAlign: "left", padding: "10px" }}>Date</th>
               <th style={{ textAlign: "left", padding: "10px" }}>Item</th>
@@ -331,7 +326,7 @@ export default function Inventory({ inventory, setInventory, user, searchTerm = 
           <tbody>
             {filteredInventory.map((s, i) => (
               <tr key={i} style={{ backgroundColor: selectedItems.has(i) ? "#eff6ff" : "white", borderBottom: "1px solid #e2e8f0" }}>
-                <td style={{ padding: "10px" }}><input type="checkbox" checked={selectedItems.has(i)} onChange={() => toggleSelectItem(i)} /></td>
+                <td className="no-print" style={{ padding: "10px" }}><input type="checkbox" checked={selectedItems.has(i)} onChange={() => toggleSelectItem(i)} /></td>
                 <td style={{ padding: "10px" }}>{i + 1}</td>
                 <td style={{ padding: "10px" }}>{editingIndex === i ? <input className="input-field" type="date" value={editValues.date || ""} onChange={(e) => setEditValues({ ...editValues, date: e.target.value })} /> : s.date}</td>
                 <td style={{ padding: "10px" }}>{editingIndex === i ? <input className="input-field" value={editValues.item || ""} onChange={(e) => setEditValues({ ...editValues, item: e.target.value })} list="material-options" /> : s.item}</td>

@@ -1,4 +1,5 @@
 from collections.abc import Iterator
+from datetime import datetime, timedelta, timezone
 
 from urllib.parse import parse_qs, urlparse
 
@@ -140,6 +141,7 @@ def test_purchase_to_receipt_to_stock_issue(client: TestClient):
     converted = client.post(f"/purchase-requests/{request_id}/convert-to-orders", headers=buyer_headers)
     assert converted.status_code == 201, converted.text
     order = converted.json()["purchase_orders"][0]
+    assert order["order_number"] == "PO:001"
     assert order["lines"][0]["subtotal"] == "100.00"
 
     first_receipt = client.post(
@@ -376,13 +378,14 @@ def test_approval_delegation_allows_delegate_to_decide(client: TestClient):
     approver = _token(client, "approver@example.com", "Approver-password-123")
     buyer_headers = {"Authorization": f"Bearer {buyer}"}
     approver_headers = {"Authorization": f"Bearer {approver}"}
+    now = datetime.now(timezone.utc)
     delegation = client.post(
         "/approval-delegations",
         headers=approver_headers,
         json={
             "delegate_user_id": 2,
-            "starts_at": "2026-11-14T00:00:00Z",
-            "ends_at": "2026-11-15T00:00:00Z",
+            "starts_at": (now - timedelta(days=1)).isoformat(),
+            "ends_at": (now + timedelta(days=1)).isoformat(),
         },
     )
     assert delegation.status_code == 201, delegation.text

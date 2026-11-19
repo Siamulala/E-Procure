@@ -27,9 +27,9 @@ function Message({ error, message }) {
   return <p className={error ? "alwen-feature-error" : "alwen-feature-success"} role={error ? "alert" : "status"}>{error || message}</p>;
 }
 
-export default function AlwenFeatures({ user }) {
+export default function AlwenFeatures({ user, initialSection = "suppliers" }) {
   const { section } = useParams();
-  const [tab, setTab] = useState(section || "suppliers");
+  const [tab, setTab] = useState(section || initialSection);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -65,8 +65,9 @@ export default function AlwenFeatures({ user }) {
   const [taxForm, setTaxForm] = useState({ vat_rate: "0.1600", services: "", professional_fees: "", contractual: "" });
 
   useEffect(() => {
-    if (section && tabs.some(([key]) => key === section)) setTab(section);
-  }, [section]);
+    const target = section || initialSection;
+    if (tabs.some(([key]) => key === target)) setTab(target);
+  }, [section, initialSection]);
 
   const load = useCallback(async () => {
     setError("");

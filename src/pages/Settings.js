@@ -1,7 +1,10 @@
 // src/pages/Settings.js
 import React, { useState, useEffect, useMemo } from "react";
+import { useInventory } from "../contexts/InventoryContext";
+import { MENU_ACCESS_ITEMS } from "../utils/menuAccess";
 
 export default function Settings({ user, setUser }) {
+  const { roleMenuPermissions, setRoleMenuPermissions } = useInventory();
   const [profile, setProfile] = useState({
     name: user?.name || "",
     role: user?.role || "",
@@ -88,9 +91,15 @@ export default function Settings({ user, setUser }) {
     const updatedRoles = [...roles, newRole];
     setRoles(updatedRoles);
     const updatedPermissions = { ...rolePermissions, [newRole]: [] };
+    const updatedMenuPermissions = {
+      ...roleMenuPermissions,
+      [newRole]: MENU_ACCESS_ITEMS.map((menu) => menu.path),
+    };
     setRolePermissions(updatedPermissions);
+    setRoleMenuPermissions(updatedMenuPermissions);
     localStorage.setItem("roles", JSON.stringify(updatedRoles));
     localStorage.setItem("rolePermissions", JSON.stringify(updatedPermissions));
+    localStorage.setItem("roleMenuPermissions", JSON.stringify(updatedMenuPermissions));
     setNewRole("");
   };
 
@@ -105,6 +114,21 @@ export default function Settings({ user, setUser }) {
     localStorage.setItem("rolePermissions", JSON.stringify(updatedPermissions));
   };
 
+  const handleMenuPermissionToggle = (menuPath) => {
+    if (!selectedRoleForEdit || selectedRoleForEdit === "Admin") return;
+    const roleMenus = roleMenuPermissions[selectedRoleForEdit]
+      || MENU_ACCESS_ITEMS.map((menu) => menu.path);
+    const updatedRoleMenus = roleMenus.includes(menuPath)
+      ? roleMenus.filter((path) => path !== menuPath)
+      : [...roleMenus, menuPath];
+    const updatedMenuPermissions = {
+      ...roleMenuPermissions,
+      [selectedRoleForEdit]: updatedRoleMenus,
+    };
+    setRoleMenuPermissions(updatedMenuPermissions);
+    localStorage.setItem("roleMenuPermissions", JSON.stringify(updatedMenuPermissions));
+  };
+
   const handleDeleteRole = (roleName) => {
     if (["Admin", "Director"].includes(roleName)) {
       alert("Cannot delete system roles");
@@ -113,11 +137,15 @@ export default function Settings({ user, setUser }) {
     if (window.confirm(`Delete role "${roleName}"?`)) {
       const updatedRoles = roles.filter(r => r !== roleName);
       const updatedPermissions = { ...rolePermissions };
+      const updatedMenuPermissions = { ...roleMenuPermissions };
       delete updatedPermissions[roleName];
+      delete updatedMenuPermissions[roleName];
       setRoles(updatedRoles);
       setRolePermissions(updatedPermissions);
+      setRoleMenuPermissions(updatedMenuPermissions);
       localStorage.setItem("roles", JSON.stringify(updatedRoles));
       localStorage.setItem("rolePermissions", JSON.stringify(updatedPermissions));
+      localStorage.setItem("roleMenuPermissions", JSON.stringify(updatedMenuPermissions));
       setSelectedRoleForEdit(null);
     }
   };
@@ -357,18 +385,38 @@ export default function Settings({ user, setUser }) {
               <div>
                 <h4>Permissions for {selectedRoleForEdit || "Select a role"}</h4>
                 {selectedRoleForEdit && (
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
-                    {availablePermissions.map((perm) => (
-                      <label key={perm} style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                        <input
-                          type="checkbox"
-                          checked={(rolePermissions[selectedRoleForEdit] || []).includes(perm)}
-                          onChange={() => handlePermissionToggle(perm)}
-                        />
-                        {perm.replace(/_/g, " ")}
-                      </label>
-                    ))}
-                  </div>
+                  <>
+                    <h5>Feature permissions</h5>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
+                      {availablePermissions.map((perm) => (
+                        <label key={perm} style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                          <input
+                            type="checkbox"
+                            checked={(rolePermissions[selectedRoleForEdit] || []).includes(perm)}
+                            onChange={() => handlePermissionToggle(perm)}
+                          />
+                          {perm.replace(/_/g, " ")}
+                        </label>
+                      ))}
+                    </div>
+                    <h4 style={{ marginTop: 24 }}>Menu access</h4>
+                    <p className="panel-copy">Unchecked menus are hidden from this role and direct navigation is blocked. Admin access stays unrestricted.</p>
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "10px", marginTop: 12 }}>
+                      {MENU_ACCESS_ITEMS.map((menu) => (
+                        <label key={menu.path} style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                          <input
+                            type="checkbox"
+                            checked={selectedRoleForEdit === "Admin"
+                              || (roleMenuPermissions[selectedRoleForEdit]
+                                || MENU_ACCESS_ITEMS.map((entry) => entry.path)).includes(menu.path)}
+                            disabled={selectedRoleForEdit === "Admin"}
+                            onChange={() => handleMenuPermissionToggle(menu.path)}
+                          />
+                          {menu.label}
+                        </label>
+                      ))}
+                    </div>
+                  </>
                 )}
               </div>
             </div>

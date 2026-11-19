@@ -6,13 +6,18 @@ import {
   Chart as ChartJS,
   Legend,
   LinearScale,
+  LineElement,
+  PointElement,
   Tooltip
 } from "chart.js";
-import { Bar, Doughnut } from "react-chartjs-2";
+import { Bar, Doughnut, Line } from "react-chartjs-2";
 import * as XLSX from "xlsx";
+import PrintHeader from "../../components/PrintHeader";
 import { alwenApiDownload, alwenApiRequest } from "../../services/alwenApi";
+import { getCompanyLogoPngDataUrl } from "../../utils/companyBrand";
+import "../../styles/Pages.css";
 
-ChartJS.register(ArcElement, BarElement, CategoryScale, LinearScale, Legend, Tooltip);
+ChartJS.register(ArcElement, BarElement, CategoryScale, LinearScale, LineElement, PointElement, Legend, Tooltip);
 
 const today = () => new Intl.DateTimeFormat("en-CA", {
   timeZone: "Africa/Nairobi",
@@ -37,8 +42,21 @@ const cardStyle = { display: "grid", gap: 8, minHeight: 112 };
 const chartOptions = {
   responsive: true,
   maintainAspectRatio: false,
-  plugins: { legend: { position: "bottom" } },
-  scales: { y: { ticks: { callback: moneyTick } } }
+  plugins: { legend: { display: false } },
+  scales: {
+    x: { grid: { display: false } },
+    y: { beginAtZero: true, ticks: { callback: moneyTick } }
+  }
+};
+const horizontalBarOptions = {
+  responsive: true,
+  maintainAspectRatio: false,
+  indexAxis: "y",
+  plugins: { legend: { display: false } },
+  scales: {
+    x: { beginAtZero: true, ticks: { callback: moneyTick } },
+    y: { grid: { display: false } }
+  }
 };
 const chartColors = ["#2563eb", "#0f766e", "#f59e0b", "#7c3aed", "#dc2626", "#0891b2"];
 
@@ -57,7 +75,12 @@ function AnalyticsTable({ title, columns, rows, empty, renderRow }) {
   );
 }
 
-export default function AlwenAnalytics({ user }) {
+function ReportDetails({ compact, children }) {
+  if (!compact) return children;
+  return <details className="alwen-dashboard-details"><summary>Detailed tables</summary><div>{children}</div></details>;
+}
+
+export default function AlwenAnalytics({ user, compact = false }) {
   const initialToday = today();
   const [filters, setFilters] = useState({
     start_date: `${initialToday.slice(0, 4)}-01-01`,
@@ -148,7 +171,16 @@ export default function AlwenAnalytics({ user }) {
     if (!report) return;
     const workbook = XLSX.utils.book_new();
     const addSheet = (name, rows) => {
-      XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(rows), name);
+      const entries = rows || [];
+      const sheet = XLSX.utils.aoa_to_sheet([
+        ["Easy-Procure"],
+        ["Procurement & Inventory Analytics"],
+        ["Generated", new Date().toLocaleString()],
+        [],
+        entries.length ? Object.keys(entries[0]) : [],
+        ...entries.map((entry) => Object.values(entry))
+      ]);
+      XLSX.utils.book_append_sheet(workbook, sheet, name);
     };
     addSheet("Summary", [
       { Metric: "PO commitments in period (KES)", Value: summary.period_po_commitments },
@@ -172,56 +204,68 @@ export default function AlwenAnalytics({ user }) {
       addSheet("Low stock", report.stock.low_stock_items);
       addSheet("Stock by store", report.stock.by_store);
     }
-    XLSX.writeFile(workbook, "alwen-analytics.xlsx");
+    try {
+      XLSX.writeFile(workbook, "alwen-analytics.xlsx");
+      setError("");
+    } catch (exportError) {
+      setError(`Could not export Excel: ${exportError.message}`);
+    }
   };
 
   const exportPdf = async () => {
     if (!report) return;
-    const { jsPDF } = await import("jspdf");
-    const document = new jsPDF({ orientation: "landscape" });
-    const pageWidth = document.internal.pageSize.getWidth();
-    const pageHeight = document.internal.pageSize.getHeight();
-    let y = 16;
-    document.setFontSize(16);
-    document.text("Alwen Procurement & Inventory Analytics", 14, y);
-    y += 8;
-    document.setFontSize(9);
-    document.text(`Period: ${report.filters.start_date || "All"} to ${report.filters.end_date || "All"} · Values are PO commitments, not paid expenditure.`, 14, y);
-    y += 9;
-    const addSection = (title, lines) => {
-      if (!lines.length) return;
-      if (y > pageHeight - 15) {
-        document.addPage();
-        y = 16;
-      }
-      document.setFontSize(12);
-      document.text(title, 14, y);
-      y += 7;
-      document.setFontSize(8);
-      lines.forEach((line) => {
-        const wrapped = document.splitTextToSize(line, pageWidth - 28);
-        wrapped.forEach((text) => {
-          if (y > pageHeight - 12) {
-            document.addPage();
-            y = 16;
-          }
-          document.text(text, 14, y);
-          y += 4.5;
+    try {
+      const { jsPDF } = await import("jspdf");
+      const document = new jsPDF({ orientation: "landscape" });
+      const logo = await getCompanyLogoPngDataUrl();
+      const pageWidth = document.internal.pageSize.getWidth();
+      const pageHeight = document.internal.pageSize.getHeight();
+      let y = 30;
+      document.addImage(logo, "PNG", 14, 8, 58, 13);
+      document.setFontSize(16);
+      document.text("Procurement & Inventory Analytics", 14, y);
+      y += 8;
+      document.setFontSize(9);
+      document.text(`Period: ${report.filters.start_date || "All"} to ${report.filters.end_date || "All"} · Values are PO commitments, not paid expenditure.`, 14, y);
+      y += 9;
+      const addSection = (title, lines) => {
+        if (!lines.length) return;
+        if (y > pageHeight - 15) {
+          document.addPage();
+          y = 16;
+        }
+        document.setFontSize(12);
+        document.text(title, 14, y);
+        y += 7;
+        document.setFontSize(8);
+        lines.forEach((line) => {
+          const wrapped = document.splitTextToSize(line, pageWidth - 28);
+          wrapped.forEach((text) => {
+            if (y > pageHeight - 12) {
+              document.addPage();
+              y = 16;
+            }
+            document.text(text, 14, y);
+            y += 4.5;
+          });
         });
-      });
-      y += 3;
-    };
-    addSection("Summary", [
-      `PO commitments: ${formatKES(summary.period_po_commitments)} · Orders: ${summary.purchase_order_count}`,
-      `Open PO value remaining: ${formatKES(summary.open_po_value)} · Current stock value: ${report.stock ? formatKES(report.stock.stock_value) : "Not available"}`,
-      `Top supplier: ${summary.top_supplier || "—"} · Top project: ${summary.top_project || "—"}`
-    ]);
-    addSection("Monthly PO commitments", report.monthly_commitments.map((entry) => `${entry.month} | ${formatKES(entry.value)} | ${entry.purchase_order_count} POs`));
-    addSection("Supplier commitments", report.supplier_spend.map((entry) => `${entry.supplier} | ${formatKES(entry.value)} | ${entry.share_percent}% | ${entry.purchase_order_count} POs`));
-    addSection("Project commitments", report.project_spend.map((entry) => `${entry.project} | ${formatKES(entry.value)} | ${entry.share_percent}%`));
-    addSection("Category commitments", report.category_spend.map((entry) => `${entry.category} | ${formatKES(entry.value)} | Qty ${formatQuantity(entry.quantity)}`));
-    addSection("Stock movement by month", report.stock_movements_by_month.map((entry) => `${entry.month} | Received ${formatQuantity(entry.received)} | Net issued ${formatQuantity(entry.issued)}`));
-    document.save("alwen-analytics.pdf");
+        y += 3;
+      };
+      addSection("Summary", [
+        `PO commitments: ${formatKES(summary.period_po_commitments)} · Orders: ${summary.purchase_order_count}`,
+        `Open PO value remaining: ${formatKES(summary.open_po_value)} · Current stock value: ${report.stock ? formatKES(report.stock.stock_value) : "Not available"}`,
+        `Top supplier: ${summary.top_supplier || "—"} · Top project: ${summary.top_project || "—"}`
+      ]);
+      addSection("Monthly PO commitments", report.monthly_commitments.map((entry) => `${entry.month} | ${formatKES(entry.value)} | ${entry.purchase_order_count} POs`));
+      addSection("Supplier commitments", report.supplier_spend.map((entry) => `${entry.supplier} | ${formatKES(entry.value)} | ${entry.share_percent}% | ${entry.purchase_order_count} POs`));
+      addSection("Project commitments", report.project_spend.map((entry) => `${entry.project} | ${formatKES(entry.value)} | ${entry.share_percent}%`));
+      addSection("Category commitments", report.category_spend.map((entry) => `${entry.category} | ${formatKES(entry.value)} | Qty ${formatQuantity(entry.quantity)}`));
+      addSection("Stock movement by month", report.stock_movements_by_month.map((entry) => `${entry.month} | Received ${formatQuantity(entry.received)} | Net issued ${formatQuantity(entry.issued)}`));
+      document.save("alwen-analytics.pdf");
+      setError("");
+    } catch (exportError) {
+      setError(`Could not export PDF: ${exportError.message}`);
+    }
   };
 
   const summary = report?.summary;
@@ -230,8 +274,12 @@ export default function AlwenAnalytics({ user }) {
     datasets: [{
       label: "PO commitments (KES)",
       data: (report?.monthly_commitments || []).map((entry) => Number(entry.value)),
-      backgroundColor: "#2563eb",
-      borderRadius: 6
+      borderColor: "#2563eb",
+      backgroundColor: "rgba(37, 99, 235, 0.14)",
+      pointBackgroundColor: "#2563eb",
+      pointRadius: 3,
+      tension: 0.3,
+      fill: true
     }]
   }), [report]);
   const supplierChart = useMemo(() => {
@@ -239,27 +287,64 @@ export default function AlwenAnalytics({ user }) {
     return {
       labels: topSuppliers.map((entry) => entry.supplier),
       datasets: [{
+        label: "PO commitments",
         data: topSuppliers.map((entry) => Number(entry.value)),
-        backgroundColor: chartColors
+        backgroundColor: chartColors,
+        borderRadius: 5,
+        barThickness: 18
       }]
     };
   }, [report]);
+  const categoryChart = useMemo(() => {
+    const categories = (report?.category_spend || []).slice(0, 6);
+    return {
+      labels: categories.map((entry) => entry.category),
+      datasets: [{
+        data: categories.map((entry) => Number(entry.value)),
+        backgroundColor: chartColors,
+        borderWidth: 0
+      }]
+    };
+  }, [report]);
+  const projectChart = useMemo(() => {
+    const projectsForChart = (report?.project_spend || []).slice(0, 6);
+    return {
+      labels: projectsForChart.map((entry) => entry.project),
+      datasets: [{
+        label: "PO commitments",
+        data: projectsForChart.map((entry) => Number(entry.value)),
+        backgroundColor: "#0f766e",
+        borderRadius: 5,
+        barThickness: 18
+      }]
+    };
+  }, [report]);
+  const supplierCount = (report?.supplier_spend || [])
+    .filter((entry) => entry.supplier !== "Unassigned").length;
+  const requestsAwaitingAction = (report?.purchase_request_funnel || [])
+    .filter((entry) => ["Submitted", "Approved"].includes(entry.status))
+    .reduce((total, entry) => total + Number(entry.count || 0), 0);
 
   return (
-    <div className="page-shell">
-      <div className="page-header">
-        <div>
-          <p className="page-eyebrow">Alwen procurement & inventory</p>
-          <h1 className="page-title">Analytics & reports</h1>
-          <p className="page-subtitle">PO commitments, stock position, movements, suppliers, and project usage.</p>
-        </div>
-        <button className="secondary-btn" type="button" onClick={() => loadReport()} disabled={loading}>Refresh reports</button>
-      </div>
+    <div className="page-shell page-content alwen-analytics-dashboard">
+      <PrintHeader
+        title="Procurement Spend Overview"
+        subtitle="A decision-ready view of purchase-order commitments, supplier concentration, project allocation, and stock."
+      />
 
       {error ? <p role="alert" style={{ color: "#b91c1c" }}>{error}</p> : null}
 
       <section className="page-card">
-        <form onSubmit={applyFilters} className="form-row" style={{ alignItems: "end", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))" }}>
+        <div className="panel-heading">
+          <div>
+            <h2 className="panel-title">Dashboard filters</h2>
+            <p className="panel-copy">Filter procurement commitments by period, project, supplier, or item category.</p>
+          </div>
+          <button className="secondary-btn no-print" type="button" onClick={() => loadReport()} disabled={loading}>
+            {loading ? "Refreshing…" : "Refresh"}
+          </button>
+        </div>
+        <form onSubmit={applyFilters} className="form-row alwen-dashboard-filters">
           <label className="alwen-field">From<input className="input-field" type="date" name="start_date" value={filters.start_date} onChange={updateFilter} /></label>
           <label className="alwen-field">To<input className="input-field" type="date" name="end_date" value={filters.end_date} onChange={updateFilter} /></label>
           <label className="alwen-field">Project
@@ -289,49 +374,88 @@ export default function AlwenAnalytics({ user }) {
       {loading && !report ? <p role="status">Loading analytics...</p> : null}
       {report ? (
         <>
-          <div className="page-grid page-grid--cards">
+          <p className="analytics-measure-note">{report.definitions.spend} This dashboard does not represent paid expenditure.</p>
+          <div className="page-grid page-grid--cards alwen-dashboard-kpis">
             <section className="page-card" style={cardStyle}>
-              <p className="stat-title">PO commitments in period</p>
+              <p className="stat-title">PO commitments</p>
               <strong className="stat-value">{formatKES(summary.period_po_commitments)}</strong>
-              <p className="panel-copy">{summary.purchase_order_count} purchase orders</p>
+              <p className="panel-copy">For the selected period and filters</p>
             </section>
             <section className="page-card" style={cardStyle}>
-              <p className="stat-title">Open PO value remaining</p>
+              <p className="stat-title">Open PO value</p>
               <strong className="stat-value">{formatKES(summary.open_po_value)}</strong>
-              <p className="panel-copy">Unreceived quantities only</p>
+              <p className="panel-copy">Remaining value on open and partially received orders</p>
             </section>
             <section className="page-card" style={cardStyle}>
-              <p className="stat-title">{summary.this_month} vs {summary.last_month}</p>
-              <strong className="stat-value">{formatKES(summary.this_month_po_commitments)}</strong>
-              <p className="panel-copy">Previous month: {formatKES(summary.last_month_po_commitments)}</p>
+              <p className="stat-title">Purchase orders</p>
+              <strong className="stat-value">{summary.purchase_order_count}</strong>
+              <p className="panel-copy">Orders with commitments in this period</p>
             </section>
             <section className="page-card" style={cardStyle}>
-              <p className="stat-title">Top supplier / project</p>
-              <strong className="stat-value" style={{ fontSize: 17 }}>{summary.top_supplier || "—"}</strong>
-              <p className="panel-copy">{summary.top_project || "No project data"}</p>
+              <p className="stat-title">Suppliers with commitments</p>
+              <strong className="stat-value">{supplierCount}</strong>
+              <p className="panel-copy">Suppliers with POs in this period</p>
+            </section>
+            <section className="page-card" style={cardStyle}>
+              <p className="stat-title">Requests awaiting action</p>
+              <strong className="stat-value">{requestsAwaitingAction}</strong>
+              <p className="panel-copy">Submitted or approved requests</p>
             </section>
             {report.stock ? (
               <section className="page-card" style={cardStyle}>
                 <p className="stat-title">Current stock value</p>
                 <strong className="stat-value">{formatKES(report.stock.stock_value)}</strong>
-                <p className="panel-copy">{report.stock.low_stock_count} low-stock items</p>
+                <p className="panel-copy">Current snapshot; category filter applies</p>
               </section>
             ) : null}
           </div>
 
           <div className="analytics-chart-grid">
             <section className="page-card">
-              <h2 className="panel-title">Monthly PO commitments</h2>
-              <p className="panel-copy">Order values grouped by PO date</p>
-              <div className="analytics-chart"><Bar data={monthlyChart} options={chartOptions} /></div>
+              <div className="panel-heading">
+                <div>
+                  <h2 className="panel-title">Monthly spend trend</h2>
+                  <p className="panel-copy">PO commitments by order date</p>
+                </div>
+              </div>
+              {monthlyChart.labels.length ? (
+                <div className="analytics-chart alwen-dashboard-chart"><Line data={monthlyChart} options={chartOptions} /></div>
+              ) : <p className="panel-copy chart-empty">No commitments for this period.</p>}
             </section>
             <section className="page-card">
-              <h2 className="panel-title">Supplier spend share</h2>
-              <p className="panel-copy">Top six suppliers in the filtered period</p>
-              <div className="analytics-chart"><Doughnut data={supplierChart} options={{ responsive: true, maintainAspectRatio: false, plugins: { legend: { position: "bottom" } } }} /></div>
+              <h2 className="panel-title">Top suppliers by commitment</h2>
+              <p className="panel-copy">Highest-value suppliers in the filtered period</p>
+              {supplierChart.labels.length ? (
+                <div className="analytics-chart alwen-dashboard-chart"><Bar data={supplierChart} options={horizontalBarOptions} /></div>
+              ) : <p className="panel-copy chart-empty">No supplier commitments for this period.</p>}
             </section>
           </div>
 
+          <div className="analytics-chart-grid">
+            <section className="page-card">
+              <h2 className="panel-title">Spend by category</h2>
+              <p className="panel-copy">Share of PO commitments by item category</p>
+              {categoryChart.labels.length ? (
+                <div className="analytics-chart alwen-dashboard-chart">
+                  <Doughnut
+                    data={categoryChart}
+                    options={{ responsive: true, maintainAspectRatio: false, plugins: { legend: { position: "bottom" } } }}
+                  />
+                </div>
+              ) : <p className="panel-copy chart-empty">No categorized commitments for this period.</p>}
+            </section>
+            <section className="page-card">
+              <h2 className="panel-title">Spend by project</h2>
+              <p className="panel-copy">Project allocation for the filtered period</p>
+              {projectChart.labels.length ? (
+                <div className="analytics-chart alwen-dashboard-chart">
+                  <Bar data={projectChart} options={horizontalBarOptions} />
+                </div>
+              ) : <p className="panel-copy chart-empty">No project allocations for this period.</p>}
+            </section>
+          </div>
+
+          <ReportDetails compact={compact}>
           <div className="analytics-chart-grid">
             <AnalyticsTable
               title="Purchase request funnel"
@@ -427,6 +551,7 @@ export default function AlwenAnalytics({ user }) {
             empty="No item quotations found for these filters."
             renderRow={(entry) => <tr key={`${entry.item_id}-${entry.supplier_id}`}><td>{entry.item}</td><td>{entry.supplier}</td><td>{entry.quote_count}</td><td>{formatKES(entry.average_rate)}</td><td>{formatKES(entry.lowest_rate)}</td><td>{formatKES(entry.highest_rate)}</td></tr>}
           />
+          </ReportDetails>
 
           <section className="page-card">
             <div className="panel-heading">

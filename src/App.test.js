@@ -1,7 +1,11 @@
 import React from 'react';
 import { fireEvent, render, screen } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
 import App from './App';
+import Sidebar from './components/Sidebar';
 import Inventory from './pages/Inventory';
+import Settings from './pages/Settings';
+import { InventoryProvider } from './contexts/InventoryContext';
 
 jest.mock('react-chartjs-2', () => ({
   Pie: () => <div data-testid="pie-chart" />,
@@ -18,7 +22,7 @@ test('renders the administrator login screen', () => {
   expect(screen.getByText(/Administrator login/i)).toBeInTheDocument();
 });
 
-test('redirects authenticated users to the dashboard from the home route', () => {
+test('redirects authenticated users to the single analytics dashboard from the home route', () => {
   localStorage.setItem(
     'user',
     JSON.stringify({ name: 'Admin', email: 'admin@easyprocure.com', role: 'Admin', password: 'admin' })
@@ -26,7 +30,7 @@ test('redirects authenticated users to the dashboard from the home route', () =>
 
   render(<App />);
 
-  expect(screen.getByText(/Hi, Admin/i)).toBeInTheDocument();
+  expect(screen.getByRole('heading', { name: 'Inventory Dashboard' })).toBeInTheDocument();
 });
 
 test('shows profile actions in the navbar for signed-in users', () => {
@@ -41,6 +45,108 @@ test('shows profile actions in the navbar for signed-in users', () => {
   expect(screen.getByText(/Edit name/i)).toBeInTheDocument();
   expect(screen.getByText(/Change password/i)).toBeInTheDocument();
   expect(screen.getByText(/Sign out/i)).toBeInTheDocument();
+});
+
+test('Inventory beside Dashboard opens nested purchase, supplier, and stock folders', () => {
+  render(
+    <MemoryRouter
+      initialEntries={['/inventory']}
+      future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+    >
+      <InventoryProvider>
+        <Sidebar user={{ role: 'Admin' }} />
+      </InventoryProvider>
+    </MemoryRouter>
+  );
+
+  const dashboardLink = screen.getByRole('link', { name: 'Dashboard' });
+  expect(dashboardLink).toHaveAttribute('href', '/inventory/dashboard');
+  expect(screen.getAllByRole('link')[0]).toBe(dashboardLink);
+  const inventoryToggle = screen.getByRole('button', { name: 'Inventory' });
+  expect(inventoryToggle).toHaveAttribute('aria-expanded', 'false');
+  fireEvent.click(inventoryToggle);
+  const purchaseToggle = screen.getByRole('button', { name: 'Purchase' });
+  expect(purchaseToggle).toHaveAttribute('aria-expanded', 'false');
+  expect(screen.getByRole('button', { name: 'Supplier' })).toHaveAttribute('aria-expanded', 'false');
+  expect(screen.getByRole('button', { name: 'Stock' })).toHaveAttribute('aria-expanded', 'false');
+  expect(screen.getByRole('link', { name: 'Inventory Stock' })).toHaveAttribute('href', '/inventory');
+  expect(document.querySelector('#inventory-submenu').firstElementChild).toHaveTextContent('Inventory Stock');
+  expect(screen.queryByRole('link', { name: 'Purchase Orders' })).not.toBeInTheDocument();
+  fireEvent.click(purchaseToggle);
+  fireEvent.click(screen.getByRole('button', { name: 'Supplier' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Stock' }));
+  expect(screen.getByRole('link', { name: 'Supplier Details' })).toHaveAttribute('href', '/inventory/suppliers');
+  expect(screen.getByRole('link', { name: 'Supplier Invoice' })).toHaveAttribute('href', '/inventory/supplier-invoices');
+  expect(screen.queryByRole('link', { name: 'Items' })).not.toBeInTheDocument();
+  expect(screen.getByRole('link', { name: 'Purchase Orders' })).toHaveAttribute('href', '/inventory/purchase-orders');
+  expect(screen.getByRole('link', { name: 'Stock In' })).toHaveAttribute('href', '/inventory/stock-in');
+  expect(screen.getByRole('link', { name: 'Stock Out' })).toHaveAttribute('href', '/inventory/stock-out');
+  expect(screen.getByRole('link', { name: 'Purchase Requests' })).toHaveAttribute('href', '/inventory/purchase-requests');
+  expect(screen.getByRole('link', { name: 'Purchase Quotation' })).toHaveAttribute('href', '/inventory/quotations');
+  const purchaseLinkLabels = Array.from(document.querySelectorAll('#purchase-submenu a')).map((link) => link.textContent);
+  expect(purchaseLinkLabels).toEqual([
+    'Purchase Orders',
+    'Purchase Requests',
+    'Purchase Quotation',
+  ]);
+  expect(screen.queryByRole('link', { name: 'Orders' })).not.toBeInTheDocument();
+
+  fireEvent.click(purchaseToggle);
+  expect(purchaseToggle).toHaveAttribute('aria-expanded', 'false');
+  expect(screen.queryByRole('link', { name: 'Purchase Orders' })).not.toBeInTheDocument();
+  fireEvent.click(inventoryToggle);
+  expect(screen.queryByRole('link', { name: 'Inventory Stock' })).not.toBeInTheDocument();
+  fireEvent.click(inventoryToggle);
+  expect(screen.getByRole('button', { name: 'Supplier' })).toHaveAttribute('aria-expanded', 'false');
+  expect(screen.getByRole('button', { name: 'Stock' })).toHaveAttribute('aria-expanded', 'false');
+});
+
+test.each([
+  ['/inventory/stock-in', 'Stock In', 'Record stock in'],
+  ['/inventory/stock-out', 'Stock Out', 'Record stock out'],
+])('opens the %s inventory submenu', async (path, title, actionHeading) => {
+  localStorage.setItem(
+    'user',
+    JSON.stringify({ name: 'Admin', email: 'admin@easyprocure.com', role: 'Admin' })
+  );
+  window.history.pushState({}, '', path);
+
+  render(<App />);
+
+  expect(await screen.findByRole('heading', { name: title })).toBeInTheDocument();
+  expect(screen.getByRole('heading', { name: actionHeading })).toBeInTheDocument();
+});
+
+test('admin can remove a menu from a role', () => {
+  render(
+    <InventoryProvider>
+      <Settings user={{ name: 'Admin', role: 'Admin' }} setUser={jest.fn()} />
+    </InventoryProvider>
+  );
+
+  fireEvent.click(screen.getByRole('button', { name: 'Staff' }));
+  const purchaseOrdersMenu = screen.getByLabelText('Purchase Orders');
+  expect(purchaseOrdersMenu).toBeChecked();
+  fireEvent.click(purchaseOrdersMenu);
+
+  expect(screen.getByLabelText('Purchase Orders')).not.toBeChecked();
+  expect(JSON.parse(localStorage.getItem('roleMenuPermissions')).Staff).not.toContain('/inventory/purchase-orders');
+});
+
+test('restricted roles cannot open a menu through its direct URL', async () => {
+  localStorage.setItem(
+    'user',
+    JSON.stringify({ name: 'Staff', email: 'staff@example.com', role: 'Staff' })
+  );
+  localStorage.setItem(
+    'roleMenuPermissions',
+    JSON.stringify({ Staff: ['/inventory/dashboard'] })
+  );
+  window.history.pushState({}, '', '/inventory/purchase-orders');
+
+  render(<App />);
+
+  expect(await screen.findByText(/your role does not have permission to view this menu/i)).toBeInTheDocument();
 });
 
 test('allows a user to reset their password using an emailed verification code', async () => {
@@ -69,7 +175,7 @@ test('allows a user to reset their password using an emailed verification code',
   fireEvent.change(screen.getByLabelText(/^password$/i), { target: { value: 'newpassword123' } });
   fireEvent.click(screen.getByRole('button', { name: /sign in/i }));
 
-  expect(screen.getByText(/Hi, Admin/i)).toBeInTheDocument();
+  expect(screen.getByRole('heading', { name: 'Inventory Dashboard' })).toBeInTheDocument();
   if (originalFetch) global.fetch = originalFetch;
   else delete global.fetch;
 });

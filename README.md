@@ -91,3 +91,17 @@ This section has moved here: [https://facebook.github.io/create-react-app/docs/t
 The existing React/Express app is being migrated in phases. Phase 1 adds the SQLAlchemy schema, Alembic setup, reference seeds, and Excel import staging under [`api/`](./api/). Phase 2 adds authenticated purchase-request approval/conversion, purchase-order receiving, weighted-average stock balances, and the stock ledger. Phase 3 adds filtered analytics, quote/price comparisons, stock alerts, and CSV export for purchase-order commitments. See [the API README](./api/README.md) for setup, account creation, and workflow usage.
 
 The Alwen React workspace connects to the FastAPI service when `REACT_APP_ALWEN_API_URL` is set; otherwise the legacy browser-local app remains available. The uploaded workbook is available, but workbook-specific importer reconciliation remains deferred.
+
+## Browser-local spreadsheet import
+
+On Inventory Stock, use **Actions > Upload spreadsheet** to review purchased Stock In from an Excel or CSV file. Choose the worksheet, header row, and column mappings; correct the values and exclude unwanted rows before recording. Item names/SKUs and supplier names are matched case-insensitively to existing records or created automatically. New items use the imported name or SKU for both fields, the first receipt's UOM and unit cost, and a zero reorder level; new suppliers have no contact or payment details until edited. Duplicate existing names or archived items require correction before import. Receipt dates must be `YYYY-MM-DD`. Recording adjusts stock and includes purchased receipts in dashboard analysis; importing the same file again creates duplicate receipts.
+
+Every reviewed Stock In row needs an item, quantity, UOM, receipt date, supplier and unit cost. If a row cannot be recorded, its error appears beside the recording button; correct it and try again. No rows are saved until the whole batch is valid.
+
+On the browser-local Inventory Stock report, select one receipt and choose **Actions > Edit**, or select one or more receipts and choose **Delete**. These actions require Stock In access, adjust the stock balance and purchase analytics, and cannot make stock negative. Purchase-order receipts cannot be changed independently of their order.
+
+Use **Actions > Manage categories** on Inventory Stock to add a category, rename a category across inventory items and history, or assign a category to one selected receipt. Category-only changes are also available for purchase-order receipts and do not change their quantities or values.
+
+Requesters can use the same action on Purchase Requests to load spreadsheet lines into one editable request. Quantities are converted to the item's stock unit when units are compatible; the request is not submitted until the user submits the form.
+
+Spreadsheets are processed locally using header matching, not AI or OCR. PDF and image extraction and spreadsheet import in the API-backed workspace are not supported by this workflow.

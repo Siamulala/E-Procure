@@ -13,6 +13,7 @@ import {
 } from "chart.js";
 import { Pie, Bar, Line } from "react-chartjs-2";
 import "../styles/Pages.css";
+import CompanyLogo from "../components/CompanyLogo";
 
 ChartJS.register(
   ArcElement,
@@ -155,6 +156,7 @@ export default function Dashboard({ user, suppliers = [], orders = [], inventory
     <div className="page-shell">
       <div className="page-header">
         <div>
+          <CompanyLogo className="dashboard-print-logo" />
           <p className="page-eyebrow">Procurement intelligence</p>
           <h1 className="page-title">Hi, {displayName}</h1>
           <p className="page-subtitle">{roleName} • {inventory.length} stock entries • {activeSuppliers} active suppliers</p>

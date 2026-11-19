@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from "react";
 import "../styles/Pages.css";
+import { companyLogoDataUri } from "../utils/companyBrand";
+import { formatPONumber, getPONumberSequence } from "../utils/purchaseOrderNumber";
 
 const buttonStyle = {
   padding: "10px 20px",
@@ -144,6 +146,7 @@ export default function Purchase({ purchases = [], setPurchases = () => {}, setI
         <body style="font-family:Arial, sans-serif; margin:24px; color:#1f2937;">
           <header style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:24px;">
             <div>
+              <img src="${companyLogoDataUri}" alt="Easy-Procure" style="display:block;width:240px;height:auto;margin-bottom:16px;" />
               <h1 style="margin:0;">${companyDetails.name}</h1>
               <p style="margin:6px 0 0;">${companyDetails.address}</p>
               <p style="margin:4px 0 0;">${companyDetails.phone} | ${companyDetails.email}</p>
@@ -208,9 +211,12 @@ export default function Purchase({ purchases = [], setPurchases = () => {}, setI
   const convertToOrder = () => {
     if (activeTab !== "requests") return;
     if (!selectedItems.length) return alert("Select at least one request to convert to a purchase order.");
+    const lastOrderNumber = purchaseOrders.reduce((max, order) => (
+      Math.max(max, getPONumberSequence(order.orderNumber))
+    ), 0);
     const nextOrders = selectedItems.map((item, index) => ({
       ...item,
-      orderNumber: `PO-${Date.now()}-${index + 1}`,
+      orderNumber: formatPONumber(lastOrderNumber + index + 1),
       status: "Order Created",
       createdDate: item.date || new Date().toISOString().slice(0, 10)
     }));

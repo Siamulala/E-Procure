@@ -574,7 +574,7 @@ def convert_request_to_orders(
         )
         db.add(order)
         db.flush()
-        order.order_number = f"PO-{order.order_date.year}-{order.id:06d}"
+        order.order_number = f"PO:{order.id:03d}"
         for request_line, rate in supplier_lines:
             subtotal = (request_line.quantity * rate).quantize(MONEY_QUANTUM, rounding=ROUND_HALF_UP)
             db.add(PurchaseOrderLine(
