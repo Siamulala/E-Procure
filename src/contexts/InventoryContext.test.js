@@ -9,7 +9,7 @@ import PurchaseRequests from "../pages/PurchaseRequests";
 import Quotations from "../pages/Quotations";
 import Reporting from "../pages/Reporting";
 import SupplierInvoices from "../pages/SupplierInvoices";
-import { InventoryProvider, useInventory } from "./InventoryContext";
+import { InventoryProvider, normalizeUomName, useInventory } from "./InventoryContext";
 
 function InventoryStateProbe() {
   const { items, purchaseOrders, stockMovements, receivePurchaseOrder } = useInventory();
@@ -173,6 +173,23 @@ function ProcurementPurchaseOrdersProbe() {
   );
 }
 
+function IssueCableProbe() {
+  const { recordStockMovement } = useInventory();
+  return <button type="button" onClick={() => recordStockMovement({
+    itemId: "ITM-1", movementType: "out", date: "2026-01-01", quantity: 9, uom: "km",
+  })}>Issue cable for test</button>;
+}
+
+function editOrder(number) {
+  const target = screen.getByRole("checkbox", { name: `Select ${number}` });
+  screen.getAllByRole("checkbox", { name: /^Select PO:/ }).forEach((checkbox) => {
+    if (checkbox !== target && checkbox.checked) fireEvent.click(checkbox);
+  });
+  if (!target.checked) fireEvent.click(target);
+  fireEvent.click(screen.getByRole("button", { name: "Actions" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: "Edit" }));
+}
+
 beforeEach(() => {
   localStorage.clear();
 });
@@ -258,7 +275,7 @@ test("one purchase order can contain multiple items for one supplier", () => {
     </InventoryProvider>
   );
 
-  fireEvent.change(screen.getByLabelText("Supplier"), { target: { value: "SUP-1" } });
+  fireEvent.change(screen.getByLabelText("Supplier"), { target: { value: "SUP-2" } });
   fireEvent.change(screen.getByLabelText("Item 1"), { target: { value: "ITM-1" } });
   fireEvent.change(screen.getByLabelText("Quantity 1"), { target: { value: "2" } });
   fireEvent.click(screen.getByRole("button", { name: "Add another item" }));
@@ -267,9 +284,407 @@ test("one purchase order can contain multiple items for one supplier", () => {
   fireEvent.click(screen.getByRole("button", { name: "Create purchase order" }));
 
   expect(screen.getByTestId("created-po-line-count")).toHaveTextContent("2");
+  expect(screen.getByLabelText("Supplier for register")).toHaveValue("SUP-2");
   expect(screen.getByText("PO:006")).toBeInTheDocument();
   expect(screen.getByText("2 km × 24-Core Fiber Optic Cable (1km)")).toBeInTheDocument();
   expect(screen.getByText("3 piece × 48-Port Gigabit Rack Switch")).toBeInTheDocument();
+});
+
+test("purchase order register filters item lines and exports by supplier", async () => {
+  localStorage.setItem("inventory-managed-suppliers", JSON.stringify([
+    { id: "SUP-1", name: "Fiber supplier" },
+    { id: "SUP-2", name: "Power supplier" },
+    { id: "SUP-3", name: "New supplier" },
+  ]));
+  const createObjectURL = URL.createObjectURL;
+  const revokeObjectURL = URL.revokeObjectURL;
+  URL.createObjectURL = jest.fn(() => "blob:test");
+  URL.revokeObjectURL = jest.fn();
+  const click = jest.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+  try {
+    render(<InventoryProvider><InventorySubmenu section="purchase-orders" /></InventoryProvider>);
+    expect(screen.getByRole("columnheader", { name: "Status" })).toHaveClass("no-print");
+    expect(screen.getByText("Pending")).toHaveClass("no-print");
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select PO:005" }));
+    fireEvent.click(screen.getByRole("button", { name: "Actions" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Download (JSON)" }));
+    const selection = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(JSON.parse(reader.result));
+      reader.onerror = reject;
+      reader.readAsText(URL.createObjectURL.mock.calls[0][0]);
+    });
+    expect(selection[0]).toMatchObject({ orderNumber: "PO:005" });
+    expect(selection[0]).not.toHaveProperty("status");
+    fireEvent.change(screen.getByLabelText("Supplier for register"), { target: { value: "SUP-2" } });
+    expect(screen.getByText("PO:002")).toBeInTheDocument();
+    expect(screen.getByText("PO:004")).toBeInTheDocument();
+    expect(screen.getAllByText(/12V 100Ah Deep Cycle Battery/).length).toBeGreaterThan(0);
+    expect(screen.getByText(/48-Port Gigabit Rack Switch/)).toBeInTheDocument();
+    expect(screen.queryByText("PO:005")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Documents (0)" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Actions" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Export (CSV)" }));
+    const text = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = reject;
+      reader.readAsText(URL.createObjectURL.mock.calls[1][0]);
+    });
+    expect(text).toContain("PO:002");
+    expect(text).toContain("PO:004");
+    expect(text).not.toContain("PO:005");
+    expect(text).not.toMatch(/status/i);
+    fireEvent.change(screen.getByLabelText("Supplier for register"), { target: { value: "SUP-3" } });
+    expect(screen.getByText("No purchase orders found for this supplier.")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Supplier for register"), { target: { value: "" } });
+    expect(screen.getByText("PO:005")).toBeInTheDocument();
+    expect(screen.getByText("PO:002")).toBeInTheDocument();
+    await waitFor(() => expect(URL.revokeObjectURL).toHaveBeenCalledTimes(2));
+  } finally {
+    click.mockRestore();
+    URL.createObjectURL = createObjectURL;
+    URL.revokeObjectURL = revokeObjectURL;
+  }
+});
+
+test("editing a received PO updates stock, receipts and linked invoices without changing payments", () => {
+  localStorage.setItem("inventory-managed-purchase-orders", JSON.stringify([{
+    id: "order-1", orderNumber: "PO:005", supplierId: "SUP-1", quotationId: "QT-3001",
+    date: "2026-01-01", status: "Pending", lineItems: [
+      { itemId: "ITM-1", quantity: 2, unitCost: 10, uom: "km" },
+      { itemId: "ITM-4", quantity: 4, unitCost: 30, uom: "piece" },
+    ],
+  }]));
+  localStorage.setItem("inventory-supplier-invoices", JSON.stringify([{
+    id: "invoice-1", purchaseOrderId: "order-1", purchaseOrderNumber: "PO:005",
+    supplierId: "SUP-1", supplier: "FiberLink Distributors", number: "INV-1", date: "2026-01-01",
+    amountCents: 100000, paidCents: 10000, payments: [{ id: "payment-1", amountCents: 10000 }],
+  }]));
+  const confirmSpy = jest.spyOn(window, "confirm").mockReturnValue(true);
+  try {
+    render(<InventoryProvider><ProcurementPurchaseOrdersProbe /></InventoryProvider>);
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select PO:005" }));
+    fireEvent.click(screen.getByRole("button", { name: "Actions" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Edit" }));
+    expect(screen.getByRole("heading", { name: "Edit purchase order" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel edit" }));
+    fireEvent.click(screen.getByRole("button", { name: "Receive" }));
+    editOrder("PO:005");
+    fireEvent.change(screen.getByLabelText("Supplier"), { target: { value: "SUP-2" } });
+    fireEvent.change(screen.getByLabelText("PO date"), { target: { value: "2026-02-01" } });
+    fireEvent.change(screen.getByLabelText("Quantity 1"), { target: { value: "4" } });
+    fireEvent.change(screen.getByLabelText("Unit cost 1 (KSh)"), { target: { value: "50" } });
+    fireEvent.change(screen.getByLabelText("Invoice number 1"), { target: { value: "INV-UPDATED" } });
+    fireEvent.change(screen.getByLabelText("Invoice total 1 (KSh)"), { target: { value: "50" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save purchase order" }));
+    expect(screen.getByRole("alert")).toHaveTextContent("cannot be reduced below its recorded payments");
+    expect(JSON.parse(localStorage.getItem("inventory-managed-items")).find((item) => item.id === "ITM-1").stock).toBe(6);
+    expect(JSON.parse(localStorage.getItem("inventory-supplier-invoices"))[0].number).toBe("INV-1");
+    fireEvent.change(screen.getByLabelText("Invoice total 1 (KSh)"), { target: { value: "1234.56" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save purchase order" }));
+
+    const order = JSON.parse(localStorage.getItem("inventory-managed-purchase-orders"))[0];
+    expect(order).toMatchObject({ supplierId: "SUP-2", date: "2026-02-01", quotationId: null, status: "Received" });
+    expect(order.lineItems[0]).toMatchObject({ itemId: "ITM-1", quantity: 4, unitCost: 50 });
+    const cable = JSON.parse(localStorage.getItem("inventory-managed-items")).find((item) => item.id === "ITM-1");
+    expect(cable.stock).toBe(8);
+    const receipts = JSON.parse(localStorage.getItem("inventory-stock-movements"));
+    expect(receipts).toHaveLength(2);
+    expect(receipts.find((movement) => movement.itemId === "ITM-1")).toMatchObject({
+      quantity: 4, unitCost: 50, supplierId: "SUP-2", purchaseOrderId: "order-1",
+    });
+    const invoice = JSON.parse(localStorage.getItem("inventory-supplier-invoices"))[0];
+    expect(invoice).toMatchObject({ supplierId: "SUP-2", number: "INV-UPDATED", amountCents: 123456, paidCents: 10000 });
+    expect(invoice.payments).toEqual([{ id: "payment-1", amountCents: 10000 }]);
+  } finally {
+    confirmSpy.mockRestore();
+  }
+});
+
+test("editing received lines can replace and add items while preserving subsequent reconciliation", () => {
+  const confirmSpy = jest.spyOn(window, "confirm").mockReturnValue(true);
+  try {
+    const { unmount } = render(<InventoryProvider><ProcurementPurchaseOrdersProbe /></InventoryProvider>);
+    fireEvent.click(screen.getByRole("button", { name: "Receive" }));
+    unmount();
+    const legacyReceipts = JSON.parse(localStorage.getItem("inventory-stock-movements")).map((movement) => {
+      delete movement.purchaseOrderId;
+      delete movement.purchaseOrderLineIndex;
+      return movement;
+    });
+    localStorage.setItem("inventory-stock-movements", JSON.stringify(legacyReceipts));
+    render(<InventoryProvider><ProcurementPurchaseOrdersProbe /></InventoryProvider>);
+    editOrder("PO:005");
+    fireEvent.change(screen.getByLabelText("Item 1"), { target: { value: "ITM-3" } });
+    fireEvent.click(screen.getByRole("button", { name: "Remove item 2" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add another item" }));
+    fireEvent.change(screen.getByLabelText("Item 2"), { target: { value: "ITM-2" } });
+    fireEvent.change(screen.getByLabelText("Quantity 2"), { target: { value: "3" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save purchase order" }));
+    let items = JSON.parse(localStorage.getItem("inventory-managed-items"));
+    expect(items.find((item) => item.id === "ITM-1").stock).toBe(4);
+    expect(items.find((item) => item.id === "ITM-3").stock).toBe(8);
+    expect(items.find((item) => item.id === "ITM-4").stock).toBe(45);
+    expect(items.find((item) => item.id === "ITM-2").stock).toBe(17);
+    editOrder("PO:005");
+    fireEvent.change(screen.getByLabelText("Quantity 2"), { target: { value: "2" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save purchase order" }));
+    items = JSON.parse(localStorage.getItem("inventory-managed-items"));
+    expect(items.find((item) => item.id === "ITM-2").stock).toBe(16);
+  } finally {
+    confirmSpy.mockRestore();
+  }
+});
+
+test("received PO edits reject negative stock and missing receipt history without changing records", () => {
+  const confirmSpy = jest.spyOn(window, "confirm").mockReturnValue(true);
+  try {
+    render(<InventoryProvider><ProcurementPurchaseOrdersProbe /><IssueCableProbe /></InventoryProvider>);
+    fireEvent.click(screen.getByRole("button", { name: "Receive" }));
+    fireEvent.click(screen.getByRole("button", { name: "Issue cable for test" }));
+    editOrder("PO:005");
+    fireEvent.change(screen.getByLabelText("Quantity 1"), { target: { value: "4" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save purchase order" }));
+    expect(screen.getByRole("alert")).toHaveTextContent("negative");
+    expect(JSON.parse(localStorage.getItem("inventory-managed-items")).find((item) => item.id === "ITM-1").stock).toBe(1);
+    expect(JSON.parse(localStorage.getItem("inventory-managed-purchase-orders")).find((order) => order.id === "PO-1005").lineItems[0].quantity).toBe(6);
+    fireEvent.click(screen.getByRole("button", { name: "Cancel edit" }));
+    editOrder("PO:001");
+    fireEvent.click(screen.getByRole("button", { name: "Save purchase order" }));
+    expect(screen.getByRole("alert")).toHaveTextContent("receipt records are missing or incomplete");
+  } finally {
+    confirmSpy.mockRestore();
+  }
+});
+
+test("selected lines become a separate PO for the same supplier and only those lines are received", () => {
+  localStorage.setItem("inventory-managed-purchase-orders", JSON.stringify([{
+    id: "original-order", orderNumber: "PO:005", supplierId: "SUP-1", quotationId: "QT-3001",
+    date: "2026-01-01", status: "Pending", lineItems: [
+      { itemId: "ITM-1", quantity: 2, unitCost: 10, uom: "km" },
+      { itemId: "ITM-3", quantity: 3, unitCost: 20, uom: "piece" },
+      { itemId: "ITM-4", quantity: 4, unitCost: 30, uom: "piece" },
+    ],
+  }]));
+  const confirmSpy = jest.spyOn(window, "confirm").mockReturnValue(true);
+  try {
+    render(<InventoryProvider><ProcurementPurchaseOrdersProbe /></InventoryProvider>);
+    fireEvent.click(screen.getByRole("button", { name: "Select items" }));
+    const selector = screen.getByRole("region", { name: "Select items for a new purchase order" });
+    fireEvent.click(within(selector).getByRole("checkbox", { name: /24-Core Fiber Optic Cable/ }));
+    fireEvent.click(within(selector).getByRole("checkbox", { name: /48-Port Gigabit Rack Switch/ }));
+    fireEvent.click(within(selector).getByRole("button", { name: "Create PO for selected items" }));
+
+    const orders = JSON.parse(localStorage.getItem("inventory-managed-purchase-orders"));
+    const newOrder = orders.find((order) => order.orderNumber === "PO:006");
+    const original = orders.find((order) => order.id === "original-order");
+    expect(newOrder).toMatchObject({ supplierId: "SUP-1", quotationId: "QT-3001", status: "Pending" });
+    expect(newOrder.lineItems.map((line) => line.itemId)).toEqual(["ITM-1", "ITM-3"]);
+    expect(original.lineItems.map((line) => line.itemId)).toEqual(["ITM-4"]);
+    expect(screen.getByRole("checkbox", { name: "Select PO:006" })).toBeChecked();
+    fireEvent.click(screen.getByRole("button", { name: "Documents (1)" }));
+    const document = screen.getByRole("dialog");
+    expect(document).toHaveTextContent("24-Core Fiber Optic Cable");
+    expect(document).toHaveTextContent("48-Port Gigabit Rack Switch");
+    expect(document).not.toHaveTextContent("Dual-Band Wi-Fi");
+    fireEvent.click(within(document).getByRole("button", { name: "Close" }));
+
+    const newRow = screen.getByRole("checkbox", { name: "Select PO:006" }).closest("tr");
+    fireEvent.click(within(newRow).getByRole("button", { name: "Receive" }));
+    const items = JSON.parse(localStorage.getItem("inventory-managed-items"));
+    expect(items.find((item) => item.id === "ITM-1").stock).toBe(6);
+    expect(items.find((item) => item.id === "ITM-3").stock).toBe(5);
+    expect(items.find((item) => item.id === "ITM-4").stock).toBe(45);
+    expect(JSON.parse(localStorage.getItem("inventory-stock-movements")).map((movement) => movement.itemId)).toEqual(["ITM-1", "ITM-3"]);
+  } finally {
+    confirmSpy.mockRestore();
+  }
+});
+
+test("splitting requires a partial selection and rejects orders linked to invoices", () => {
+  localStorage.setItem("inventory-supplier-invoices", JSON.stringify([{ id: "invoice-1", purchaseOrderId: "PO-1005" }]));
+  const confirmSpy = jest.spyOn(window, "confirm").mockReturnValue(true);
+  try {
+    render(<InventoryProvider><ProcurementPurchaseOrdersProbe /></InventoryProvider>);
+    fireEvent.click(screen.getByRole("button", { name: "Select items" }));
+    const selector = screen.getByRole("region", { name: "Select items for a new purchase order" });
+    const create = within(selector).getByRole("button", { name: "Create PO for selected items" });
+    fireEvent.click(create);
+    expect(within(selector).getByRole("alert")).toHaveTextContent("leave at least one item");
+    const checkboxes = within(selector).getAllByRole("checkbox");
+    checkboxes.forEach((checkbox) => fireEvent.click(checkbox));
+    fireEvent.click(create);
+    expect(within(selector).getByRole("alert")).toHaveTextContent("leave at least one item");
+    fireEvent.click(checkboxes[1]);
+    fireEvent.click(create);
+    expect(within(selector).getByRole("alert")).toHaveTextContent("linked to supplier invoices cannot be split");
+    expect(JSON.parse(localStorage.getItem("inventory-managed-purchase-orders")).find((order) => order.id === "PO-1005").lineItems).toHaveLength(2);
+  } finally {
+    confirmSpy.mockRestore();
+  }
+});
+
+test("an order cannot be split while an edit is in progress", () => {
+  render(<InventoryProvider><ProcurementPurchaseOrdersProbe /></InventoryProvider>);
+  fireEvent.click(screen.getByRole("checkbox", { name: "Select PO:005" }));
+  fireEvent.click(screen.getByRole("button", { name: "Actions" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: "Edit" }));
+  expect(screen.getByRole("button", { name: "Select items" })).toBeDisabled();
+  fireEvent.click(screen.getByRole("button", { name: "Cancel edit" }));
+  expect(screen.getByRole("button", { name: "Select items" })).toBeEnabled();
+});
+
+test("Actions keeps editing available without losing an unfinished PO edit", () => {
+  const confirmSpy = jest.spyOn(window, "confirm").mockReturnValueOnce(false).mockReturnValueOnce(true);
+  try {
+    render(<InventoryProvider><ProcurementPurchaseOrdersProbe /></InventoryProvider>);
+    editOrder("PO:005");
+    fireEvent.change(screen.getByLabelText("Quantity 1"), { target: { value: "7" } });
+    editOrder("PO:005");
+    expect(screen.getByLabelText("Quantity 1")).toHaveValue(7);
+    expect(confirmSpy).not.toHaveBeenCalled();
+
+    editOrder("PO:001");
+    expect(confirmSpy).toHaveBeenCalledTimes(1);
+    expect(screen.getByLabelText("Quantity 1")).toHaveValue(7);
+    fireEvent.click(screen.getByRole("button", { name: "Actions" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Edit" }));
+    expect(confirmSpy).toHaveBeenCalledTimes(2);
+    expect(screen.getByLabelText("Quantity 1")).toHaveValue(8);
+  } finally {
+    confirmSpy.mockRestore();
+  }
+});
+
+test("Actions edits one selected received order while documents include only open orders", () => {
+  render(<InventoryProvider><ProcurementPurchaseOrdersProbe /></InventoryProvider>);
+  expect(screen.queryByRole("button", { name: "Edit PO:001" })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("checkbox", { name: "Select PO:001" }));
+  fireEvent.click(screen.getByRole("checkbox", { name: "Select all printable purchase orders" }));
+  expect(screen.getByRole("checkbox", { name: "Select PO:001" })).toBeChecked();
+  expect(screen.getByRole("button", { name: "Documents (1)" })).toBeEnabled();
+  fireEvent.click(screen.getByRole("button", { name: "Actions" }));
+  expect(screen.getByRole("menuitem", { name: "Edit" })).toBeDisabled();
+  expect(screen.getByRole("menuitem", { name: "Delete" })).toBeEnabled();
+  fireEvent.click(screen.getByRole("button", { name: "Actions" }));
+  fireEvent.click(screen.getByRole("checkbox", { name: "Select all printable purchase orders" }));
+  expect(screen.getByRole("checkbox", { name: "Select PO:001" })).toBeChecked();
+  expect(screen.getByRole("button", { name: "Documents (0)" })).toBeDisabled();
+  fireEvent.click(screen.getByRole("button", { name: "Actions" }));
+  expect(screen.getByRole("menuitem", { name: "Edit" })).toBeEnabled();
+  expect(screen.getByRole("menuitem", { name: "Delete" })).toBeEnabled();
+  fireEvent.click(screen.getByRole("menuitem", { name: "Edit" }));
+  expect(screen.getByRole("heading", { name: "Edit purchase order" })).toBeInTheDocument();
+});
+
+test("deleting a received PO reverses stock and removes linked invoices, payments and unshared quotation", () => {
+  localStorage.setItem("inventory-managed-purchase-orders", JSON.stringify([{
+    id: "order-1", orderNumber: "PO:005", supplierId: "SUP-1", quotationId: "QT-3001",
+    date: "2026-01-01", status: "Pending",
+    lineItems: [{ itemId: "ITM-1", quantity: 2, unitCost: 10, uom: "km" }],
+  }]));
+  localStorage.setItem("inventory-supplier-invoices", JSON.stringify([{
+    id: "invoice-1", purchaseOrderId: "order-1", supplierId: "SUP-1",
+    supplier: "FiberLink Distributors", number: "INV-1", date: "2026-01-01",
+    amountCents: 100000, paidCents: 10000, payments: [{ id: "payment-1", amountCents: 10000 }],
+  }]));
+  const confirmSpy = jest.spyOn(window, "confirm").mockReturnValueOnce(false).mockReturnValueOnce(true);
+  try {
+    render(<InventoryProvider><ProcurementPurchaseOrdersProbe /></InventoryProvider>);
+    fireEvent.click(screen.getByRole("button", { name: "Receive" }));
+    editOrder("PO:005");
+    fireEvent.change(screen.getByLabelText("Quantity 1"), { target: { value: "3" } });
+    fireEvent.click(screen.getByRole("button", { name: "Actions" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
+    expect(confirmSpy.mock.calls[0][0]).toMatch(/1 linked invoice.*payment history.*1 unshared quotation.*Unsaved changes/);
+    expect(screen.getByLabelText("Quantity 1")).toHaveValue(3);
+    expect(JSON.parse(localStorage.getItem("inventory-supplier-invoices"))).toHaveLength(1);
+    fireEvent.click(screen.getByRole("button", { name: "Actions" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
+    expect(JSON.parse(localStorage.getItem("inventory-managed-items")).find((item) => item.id === "ITM-1").stock).toBe(4);
+    expect(JSON.parse(localStorage.getItem("inventory-managed-purchase-orders"))).toHaveLength(0);
+    expect(JSON.parse(localStorage.getItem("inventory-stock-movements"))).toHaveLength(0);
+    expect(JSON.parse(localStorage.getItem("inventory-supplier-invoices"))).toHaveLength(0);
+    expect(JSON.parse(localStorage.getItem("inventory-quotations"))).toHaveLength(0);
+    expect(JSON.parse(localStorage.getItem("inventory-purchase-requests"))[0].status).toBe("Approved");
+    expect(screen.getByRole("heading", { name: "Create purchase order" })).toBeInTheDocument();
+  } finally {
+    confirmSpy.mockRestore();
+  }
+});
+
+test("deleting a PO keeps its quotation if another order uses it", () => {
+  localStorage.setItem("inventory-managed-purchase-orders", JSON.stringify([
+    { id: "order-1", orderNumber: "PO:005", supplierId: "SUP-1", quotationId: "QT-3001", date: "2026-01-01", status: "Pending", lineItems: [{ itemId: "ITM-1", quantity: 1, unitCost: 10, uom: "km" }] },
+    { id: "order-2", orderNumber: "PO:006", supplierId: "SUP-1", quotationId: "QT-3001", date: "2026-01-01", status: "Pending", lineItems: [{ itemId: "ITM-1", quantity: 1, unitCost: 10, uom: "km" }] },
+  ]));
+  const confirmSpy = jest.spyOn(window, "confirm").mockReturnValue(true);
+  try {
+    render(<InventoryProvider><ProcurementPurchaseOrdersProbe /></InventoryProvider>);
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select PO:005" }));
+    fireEvent.click(screen.getByRole("button", { name: "Actions" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
+    expect(confirmSpy.mock.calls[0][0]).toContain("0 unshared quotation");
+    expect(JSON.parse(localStorage.getItem("inventory-managed-purchase-orders")).map((order) => order.id)).toEqual(["order-2"]);
+    expect(JSON.parse(localStorage.getItem("inventory-quotations"))[0].id).toBe("QT-3001");
+    expect(JSON.parse(localStorage.getItem("inventory-purchase-requests"))[0].status).toBe("Quoted");
+  } finally {
+    confirmSpy.mockRestore();
+  }
+});
+
+test("deletion leaves all records unchanged when received stock cannot be reversed", () => {
+  localStorage.setItem("inventory-supplier-invoices", JSON.stringify([{
+    id: "invoice-1", purchaseOrderId: "PO-1005", supplierId: "SUP-1", number: "INV-1",
+    date: "2026-01-01", amountCents: 10000, paidCents: 0, payments: [],
+  }]));
+  const confirmSpy = jest.spyOn(window, "confirm").mockReturnValue(true);
+  try {
+    render(<InventoryProvider><ProcurementPurchaseOrdersProbe /><IssueCableProbe /></InventoryProvider>);
+    fireEvent.click(screen.getByRole("button", { name: "Receive" }));
+    fireEvent.click(screen.getByRole("button", { name: "Issue cable for test" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select PO:005" }));
+    fireEvent.click(screen.getByRole("button", { name: "Actions" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
+    expect(screen.getByRole("alert")).toHaveTextContent("negative");
+    expect(JSON.parse(localStorage.getItem("inventory-managed-items")).find((item) => item.id === "ITM-1").stock).toBe(1);
+    expect(JSON.parse(localStorage.getItem("inventory-managed-purchase-orders")).find((order) => order.id === "PO-1005")).toBeTruthy();
+    expect(JSON.parse(localStorage.getItem("inventory-supplier-invoices"))).toHaveLength(1);
+    expect(JSON.parse(localStorage.getItem("inventory-stock-movements"))).toHaveLength(3);
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select PO:005" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select PO:001" }));
+    fireEvent.click(screen.getByRole("button", { name: "Actions" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
+    expect(screen.getByRole("alert")).toHaveTextContent("receipt records are missing or incomplete");
+    expect(JSON.parse(localStorage.getItem("inventory-managed-purchase-orders")).find((order) => order.id === "PO-1001")).toBeTruthy();
+  } finally {
+    confirmSpy.mockRestore();
+  }
+});
+
+test("deleting several received orders validates their combined stock reversal atomically", () => {
+  localStorage.setItem("inventory-managed-purchase-orders", JSON.stringify([
+    { id: "order-1", orderNumber: "PO:005", supplierId: "SUP-1", date: "2026-01-01", status: "Pending", lineItems: [{ itemId: "ITM-1", quantity: 2, unitCost: 10, uom: "km" }] },
+    { id: "order-2", orderNumber: "PO:006", supplierId: "SUP-1", date: "2026-01-01", status: "Pending", lineItems: [{ itemId: "ITM-1", quantity: 3, unitCost: 10, uom: "km" }] },
+  ]));
+  const confirmSpy = jest.spyOn(window, "confirm").mockReturnValue(true);
+  try {
+    render(<InventoryProvider><ProcurementPurchaseOrdersProbe /><IssueCableProbe /></InventoryProvider>);
+    fireEvent.click(within(screen.getByText("PO:005").closest("tr")).getByRole("button", { name: "Receive" }));
+    fireEvent.click(within(screen.getByText("PO:006").closest("tr")).getByRole("button", { name: "Receive" }));
+    fireEvent.click(screen.getByRole("button", { name: "Issue cable for test" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select PO:005" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select PO:006" }));
+    fireEvent.click(screen.getByRole("button", { name: "Actions" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
+    expect(screen.getByRole("alert")).toHaveTextContent("negative");
+    expect(JSON.parse(localStorage.getItem("inventory-managed-purchase-orders"))).toHaveLength(2);
+    expect(JSON.parse(localStorage.getItem("inventory-stock-movements"))).toHaveLength(3);
+    expect(JSON.parse(localStorage.getItem("inventory-managed-items")).find((item) => item.id === "ITM-1").stock).toBe(0);
+  } finally {
+    confirmSpy.mockRestore();
+  }
 });
 
 test("received purchase-order items appear in inventory stock", () => {
@@ -378,7 +793,7 @@ test("purchased stock-in feeds the annual inventory and dashboard, but other rec
   fireEvent.change(screen.getByLabelText("Quantity"), { target: { value: "1" } });
   fireEvent.click(screen.getByLabelText("Purchased stock"));
   fireEvent.change(screen.getByLabelText("Purchase supplier"), { target: { value: "SUP-1" } });
-  fireEvent.change(screen.getByLabelText("Purchase unit cost (KSh per selected UOM)"), { target: { value: "250" } });
+  fireEvent.change(screen.getByLabelText("Rate (KSh per selected UOM)"), { target: { value: "250" } });
   fireEvent.change(screen.getByLabelText("Reference"), { target: { value: "BUY-1" } });
   fireEvent.click(screen.getByRole("button", { name: "Record stock in" }));
   fireEvent.click(screen.getByLabelText("Purchased stock"));
@@ -404,7 +819,7 @@ test("inventory report edits and deletes Stock In while updating stock and purch
     fireEvent.change(screen.getByLabelText("Quantity"), { target: { value: "1" } });
     fireEvent.click(screen.getByLabelText("Purchased stock"));
     fireEvent.change(screen.getByLabelText("Purchase supplier"), { target: { value: "SUP-1" } });
-    fireEvent.change(screen.getByLabelText("Purchase unit cost (KSh per selected UOM)"), { target: { value: "250" } });
+    fireEvent.change(screen.getByLabelText("Rate (KSh per selected UOM)"), { target: { value: "250" } });
     fireEvent.change(screen.getByLabelText("Reference"), { target: { value: "EDIT-1" } });
     fireEvent.click(screen.getByRole("button", { name: "Record stock in" }));
 
@@ -415,7 +830,7 @@ test("inventory report edits and deletes Stock In while updating stock and purch
     const editor = screen.getByRole("heading", { name: "Edit Stock In record" }).closest("section");
     fireEvent.change(within(editor).getByLabelText("Quantity"), { target: { value: "500" } });
     fireEvent.change(within(editor).getByLabelText("UOM"), { target: { value: "m" } });
-    fireEvent.change(within(editor).getByLabelText("Purchase unit cost (KSh per selected UOM)"), { target: { value: "0.5" } });
+    fireEvent.change(within(editor).getByLabelText("Rate (KSh per selected UOM)"), { target: { value: "0.5" } });
     fireEvent.click(within(editor).getByRole("button", { name: "Save changes" }));
     expect(JSON.parse(localStorage.getItem("inventory-managed-items")).find((item) => item.id === "ITM-1").stock).toBeCloseTo(4.5);
     expect(screen.getByText(/Annual expenditure/).closest("section")).toHaveTextContent("KSh 250.00");
@@ -623,18 +1038,18 @@ test("reviewed spreadsheet stock receipts validate all rows before adjusting sto
     ["Receipt date", "SKU", "Quantity", "UOM", "Supplier", "Unit cost", "Reference"],
     ["2026-01-03", "foc-24c", 300, "m", "fiberlink distributors", 2, "INV-1"],
     ["2026-01-04", "Unmatched cable", 1, "km", "Unknown supplier", 100, "INV-2"],
-    ["2026-01-05", "unmatched cable", 500, "reel", "unknown supplier", 1, "INV-3"],
+    ["2026-01-05", "unmatched cable", -500, "m", "unknown supplier", 1, "INV-3"],
   ])] } });
   await screen.findByText("import.xlsx");
   fireEvent.click(screen.getByRole("button", { name: "Review spreadsheet rows" }));
   expect(screen.queryByLabelText(/Match item row/)).not.toBeInTheDocument();
   expect(screen.queryByLabelText(/Match supplier row/)).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "Record reviewed Stock In" }));
-  expect(screen.getByRole("alert")).toHaveTextContent("Spreadsheet row 4: Cannot convert reel to km");
+  expect(screen.getByRole("alert")).toHaveTextContent("Spreadsheet row 4: Enter a positive quantity");
   expect(JSON.parse(localStorage.getItem("inventory-stock-movements"))).toHaveLength(0);
   expect(JSON.parse(localStorage.getItem("inventory-managed-items"))).toHaveLength(5);
   expect(JSON.parse(localStorage.getItem("inventory-managed-suppliers"))).toHaveLength(2);
-  fireEvent.change(screen.getByLabelText("UOM row 4"), { target: { value: "m" } });
+  fireEvent.change(screen.getByLabelText("Quantity row 4"), { target: { value: "500" } });
   fireEvent.click(screen.getByRole("button", { name: "Record reviewed Stock In" }));
   expect(screen.getByRole("status")).toHaveTextContent("3 purchased stock receipt line(s) recorded");
   const movements = JSON.parse(localStorage.getItem("inventory-stock-movements"));
@@ -655,6 +1070,133 @@ test("reviewed spreadsheet stock receipts validate all rows before adjusting sto
   fireEvent.change(within(dashboardPage).getByLabelText("Year"), { target: { value: "2026" } });
   const dashboard = screen.getByText("Annual expenditure · 2026").closest("section");
   expect(dashboard).toHaveTextContent("KSh 1,200.00");
+});
+
+test("stock import confirms unrelated units and keeps their balances separate", async () => {
+  const confirmSpy = jest.spyOn(window, "confirm").mockReturnValueOnce(false).mockReturnValue(true);
+  try {
+    const { rerender } = render(<MemoryRouter><InventoryProvider><InventoryStock /></InventoryProvider></MemoryRouter>);
+    fireEvent.click(screen.getByRole("button", { name: "Actions" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Upload spreadsheet" }));
+    fireEvent.change(screen.getByLabelText("Choose import spreadsheet"), { target: { files: [spreadsheetFile([
+      ["Receipt date", "SKU", "Quantity", "UOM", "Supplier", "Unit cost"],
+      [`${new Date().getFullYear()}-01-03`, "BAT-12V", 1, "rolls", "FiberLink Distributors", 50],
+    ])] } });
+    await screen.findByText("import.xlsx");
+    fireEvent.click(screen.getByRole("button", { name: "Review spreadsheet rows" }));
+    fireEvent.click(screen.getByRole("button", { name: "Record reviewed Stock In" }));
+    expect(JSON.parse(localStorage.getItem("inventory-stock-movements"))).toHaveLength(0);
+    fireEvent.click(screen.getByRole("button", { name: "Record reviewed Stock In" }));
+    expect(confirmSpy).toHaveBeenCalledTimes(2);
+    expect(JSON.parse(localStorage.getItem("inventory-managed-items")).find((item) => item.id === "ITM-2")).toMatchObject({ stock: 14, unitBalances: { roll: 1 } });
+    rerender(<MemoryRouter><InventoryProvider><InventorySubmenu section="stock-out" /></InventoryProvider></MemoryRouter>);
+    fireEvent.change(screen.getByLabelText("Item", { selector: "select" }), { target: { value: "ITM-2" } });
+    expect(screen.getByText(/Current balance:/)).toHaveTextContent("14 piece, 1 roll");
+    fireEvent.change(screen.getByLabelText("UOM"), { target: { value: "roll" } });
+    fireEvent.change(screen.getByLabelText("Quantity"), { target: { value: "1" } });
+    fireEvent.click(screen.getByRole("button", { name: "Record stock out" }));
+    expect(JSON.parse(localStorage.getItem("inventory-managed-items")).find((item) => item.id === "ITM-2")).toMatchObject({ stock: 14, unitBalances: { roll: 0 } });
+    fireEvent.click(screen.getByLabelText(/Select MOV-/));
+    fireEvent.click(screen.getByRole("button", { name: "Actions" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
+    expect(JSON.parse(localStorage.getItem("inventory-managed-items")).find((item) => item.id === "ITM-2").unitBalances.roll).toBe(1);
+  } finally {
+    confirmSpy.mockRestore();
+  }
+});
+
+test.each([
+  ["Inventory Stock", <InventoryStock />, "Inventory report"],
+  ["Stock In", <InventorySubmenu section="stock-in" />, "Stock in records"],
+])("%s Actions opens cable settings where an item can be selected and saved", (pageName, page, heading) => {
+  render(<MemoryRouter><InventoryProvider>{page}</InventoryProvider></MemoryRouter>);
+  const report = screen.getByRole("heading", { name: heading }).closest("section");
+  expect(within(report).queryByLabelText("Cable item")).not.toBeInTheDocument();
+  fireEvent.click(within(report).getByRole("button", { name: "Actions" }));
+  fireEvent.click(within(report).getByRole("menuitem", { name: "Configure cable length" }));
+  fireEvent.change(within(report).getByLabelText("Cable item"), { target: { value: "ITM-1" } });
+  fireEvent.change(within(report).getByLabelText("Cable type"), { target: { value: "adss" } });
+  fireEvent.click(within(report).getByRole("button", { name: "Save cable length" }));
+  expect(within(report).getByRole("status")).toHaveTextContent("Cable length saved");
+  expect(JSON.parse(localStorage.getItem("inventory-managed-items")).find((item) => item.id === "ITM-1")).toMatchObject({ cableType: "adss", cableLengthMeters: 4000 });
+  fireEvent.click(within(report).getByRole("button", { name: "Close cable settings" }));
+  expect(within(report).queryByLabelText("Cable item")).not.toBeInTheDocument();
+});
+
+test("configured cable rolls and reels can be issued in metres and persist the remaining length", () => {
+  localStorage.setItem("inventory-managed-items", JSON.stringify([
+    { id: "ADSS", sku: "ADSS", name: "ADSS cable", uom: "roll", stock: 1, unitCost: 100, reorderLevel: 0 },
+    { id: "DROP", sku: "DROP", name: "Drop cable", uom: "reel", stock: 1, unitCost: 100, reorderLevel: 0 },
+  ]));
+  const page = <MemoryRouter><InventoryProvider><InventorySubmenu section="stock-out" /></InventoryProvider></MemoryRouter>;
+  const { unmount } = render(page);
+  fireEvent.click(screen.getByRole("button", { name: "Actions" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: "Configure cable length" }));
+  fireEvent.change(screen.getByLabelText("Cable item"), { target: { value: "ADSS" } });
+  fireEvent.change(screen.getByLabelText("Cable type"), { target: { value: "adss" } });
+  expect(screen.getByLabelText("Metres per roll")).toHaveValue(4000);
+  fireEvent.click(screen.getByRole("button", { name: "Save cable length" }));
+  fireEvent.change(screen.getByLabelText("Cable item"), { target: { value: "DROP" } });
+  fireEvent.change(screen.getByLabelText("Cable type"), { target: { value: "drop" } });
+  expect(screen.getByLabelText("Metres per reel")).toHaveValue(2000);
+  fireEvent.click(screen.getByRole("button", { name: "Save cable length" }));
+  fireEvent.click(screen.getByRole("button", { name: "Close cable settings" }));
+  fireEvent.change(screen.getByLabelText("Item", { selector: "select" }), { target: { value: "ADSS" } });
+  fireEvent.change(screen.getByLabelText("UOM"), { target: { value: "m" } });
+  fireEvent.change(screen.getByLabelText("Quantity"), { target: { value: "800" } });
+  fireEvent.click(screen.getByRole("button", { name: "Record stock out" }));
+  expect(screen.getByText(/Current balance:/)).toHaveTextContent("0.8 roll (3200 m)");
+  fireEvent.change(screen.getByLabelText("Item", { selector: "select" }), { target: { value: "DROP" } });
+  fireEvent.change(screen.getByLabelText("UOM"), { target: { value: "m" } });
+  fireEvent.change(screen.getByLabelText("Quantity"), { target: { value: "100" } });
+  fireEvent.click(screen.getByRole("button", { name: "Record stock out" }));
+  expect(screen.getByText(/Current balance:/)).toHaveTextContent("0.95 reel (1900 m)");
+  unmount();
+  render(page);
+  fireEvent.change(screen.getByLabelText("Item", { selector: "select" }), { target: { value: "ADSS" } });
+  expect(screen.getByText(/Current balance:/)).toHaveTextContent("0.8 roll (3200 m)");
+  fireEvent.change(screen.getByLabelText("UOM"), { target: { value: "m" } });
+  fireEvent.change(screen.getByLabelText("Quantity"), { target: { value: "3201" } });
+  fireEvent.click(screen.getByRole("button", { name: "Record stock out" }));
+  expect(screen.getByRole("alert")).toHaveTextContent("Only 0.8 roll");
+});
+
+test("configuring a cable combines compatible unit balances without changing unrelated pieces", () => {
+  localStorage.setItem("inventory-managed-items", JSON.stringify([
+    { id: "ADSS", sku: "ADSS", name: "ADSS cable", uom: "piece", stock: 3, unitBalances: { roll: 1, m: 1000 }, unitCost: 100, reorderLevel: 0 },
+  ]));
+  localStorage.setItem("inventory-stock-movements", JSON.stringify([
+    { id: "roll-in", itemId: "ADSS", movementType: "in", quantity: 1, uom: "roll", stockUom: "roll", quantityInStockUnit: 1 },
+    { id: "meter-in", itemId: "ADSS", movementType: "in", quantity: 1000, uom: "m", stockUom: "m", quantityInStockUnit: 1000 },
+  ]));
+  const { unmount } = render(<MemoryRouter><InventoryProvider><InventorySubmenu section="stock-out" /></InventoryProvider></MemoryRouter>);
+  fireEvent.click(screen.getByRole("button", { name: "Actions" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: "Configure cable length" }));
+  fireEvent.change(screen.getByLabelText("Cable item"), { target: { value: "ADSS" } });
+  fireEvent.change(screen.getByLabelText("Cable type"), { target: { value: "adss" } });
+  fireEvent.click(screen.getByRole("button", { name: "Save cable length" }));
+  const item = JSON.parse(localStorage.getItem("inventory-managed-items"))[0];
+  const movements = JSON.parse(localStorage.getItem("inventory-stock-movements"));
+  expect(item).toMatchObject({ stock: 3, unitBalances: { roll: 1.25 }, cableLengthMeters: 4000 });
+  expect(movements.find((movement) => movement.id === "meter-in")).toMatchObject({ stockUom: "roll", quantityInStockUnit: 0.25 });
+  unmount();
+  render(<MemoryRouter><InventoryProvider><InventorySubmenu section="stock-out" /></InventoryProvider></MemoryRouter>);
+  fireEvent.change(screen.getByLabelText("Item", { selector: "select" }), { target: { value: "ADSS" } });
+  fireEvent.change(screen.getByLabelText("UOM"), { target: { value: "m" } });
+  fireEvent.change(screen.getByLabelText("Quantity"), { target: { value: "800" } });
+  fireEvent.click(screen.getByRole("button", { name: "Record stock out" }));
+  expect(screen.getByText(/Current balance:/)).toHaveTextContent("3 piece, 1.05 roll (4200 m)");
+  fireEvent.click(screen.getByRole("button", { name: "Actions" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: "Configure cable length" }));
+  fireEvent.change(screen.getByLabelText("Cable item"), { target: { value: "ADSS" } });
+  fireEvent.change(screen.getByLabelText("Metres per roll"), { target: { value: "5000" } });
+  fireEvent.click(screen.getByRole("button", { name: "Save cable length" }));
+  expect(screen.getByRole("alert")).toHaveTextContent("already been used for converted movements");
+});
+
+test("common stock unit spellings resolve to the same unit", () => {
+  expect(["Pcs", "pieces", "rolls", "reels", "pairs", "pkts", "Packet", "packets", "meters"].map(normalizeUomName))
+    .toEqual(["piece", "piece", "roll", "reel", "pair", "packet", "packet", "packet", "m"]);
 });
 
 test("stock import refuses ambiguous existing items without creating records", async () => {
@@ -1009,7 +1551,7 @@ test("purchase-order documents include VAT controls and exclude received orders"
   expect(document.body).not.toHaveClass("voucher-open");
 });
 
-test("received purchase orders cannot be selected for document printing", () => {
+test("received purchase orders remain excluded from document printing", () => {
   render(
     <InventoryProvider>
       <ReceivedOrderProbe />
@@ -1019,7 +1561,7 @@ test("received purchase orders cannot be selected for document printing", () => 
   fireEvent.click(screen.getByRole("button", { name: "Receive order before printing" }));
 
   expect(screen.getByRole("checkbox", { name: "Select all printable purchase orders" })).toBeDisabled();
-  expect(screen.queryByRole("checkbox", { name: "Select PO:005" })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("checkbox", { name: "Select PO:005" }));
   expect(screen.getByRole("button", { name: "Documents (0)" })).toBeDisabled();
 });
 

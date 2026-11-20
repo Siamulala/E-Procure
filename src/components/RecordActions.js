@@ -22,6 +22,7 @@ export default function RecordActions({
   onDelete,
   onUpload,
   onManageCategories,
+  onConfigureCable,
   formatRecord = (record) => record,
   canEdit = true,
   canDelete = true,
@@ -75,6 +76,7 @@ export default function RecordActions({
           <button type="button" role="menuitem" disabled={!deleteEnabled} onClick={() => runAction(() => onDelete(selectedRecords))}>Delete</button>
           {onUpload ? <button type="button" role="menuitem" onClick={() => runAction(onUpload)}>Upload spreadsheet</button> : null}
           {onManageCategories ? <button type="button" role="menuitem" onClick={() => runAction(onManageCategories)}>Manage categories</button> : null}
+          {onConfigureCable ? <button type="button" role="menuitem" onClick={() => runAction(onConfigureCable)}>Configure cable length</button> : null}
           <button type="button" role="menuitem" onClick={() => runAction(() => window.print())}>Print</button>
           <button type="button" role="menuitem" disabled={!records.length} onClick={exportRecords}>Export (CSV)</button>
           <button type="button" role="menuitem" disabled={!hasSelection} onClick={downloadSelection}>Download (JSON)</button>

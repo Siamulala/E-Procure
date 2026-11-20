@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import * as XLSX from "xlsx";
-import { convertQuantity } from "../contexts/InventoryContext";
+import { convertItemQuantity, convertQuantity, normalizeUomName } from "../contexts/InventoryContext";
 
 const FIELD_ALIASES = {
   item: ["item", "itemname", "material", "materialname", "product", "productname", "sku", "itemcode", "productid"],
@@ -140,6 +140,21 @@ export default function SpreadsheetImport({ mode, items, onApply, onClose }) {
           throw new Error(`Spreadsheet row ${row.sourceRow}: ${rowError.message}`);
         }
       });
+      if (stock) {
+        const known = [...activeItems];
+        const separate = [];
+        rows.forEach((row) => {
+          let item = known.find((entry) => ["id", "sku", "name"].some((field) => sameText(entry[field], row.item)));
+          if (!item) {
+            item = { name: row.item, sku: row.item, uom: normalizeUomName(row.uom) };
+            known.push(item);
+          } else if (convertItemQuantity(1, row.uom, item.uom, item) === null) {
+            separate.push(row.sourceRow);
+          }
+        });
+        const rowList = separate.slice(0, 10).join(", ");
+        if (separate.length && !window.confirm(`Rows ${rowList}${separate.length > 10 ? ` and ${separate.length - 10} more` : ""} use units without a known conversion to the item's main stock unit. Keep these units in separate stock balances and continue?`)) return;
+      }
       onApply(rows);
       onClose();
     } catch (applyError) {

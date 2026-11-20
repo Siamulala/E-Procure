@@ -81,7 +81,7 @@ export default function InventoryDashboard() {
           <p className="stat-title">Suppliers</p><strong className="procurement-dashboard__value">{activeSuppliers}</strong><p className="panel-copy">With purchased receipts in {year}</p>
         </section>
         <section className="page-card procurement-dashboard__kpi">
-          <p className="stat-title">Low stock items</p><strong className="procurement-dashboard__value">{lowStock}</strong><p className="panel-copy">Current balance at or below reorder level</p>
+          <p className="stat-title">Low stock items</p><strong className="procurement-dashboard__value">{lowStock}</strong><p className="panel-copy">Main-unit balance at or below reorder level</p>
         </section>
       </div>
 

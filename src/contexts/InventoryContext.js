@@ -132,7 +132,7 @@ const defaultNotifications = [
 const roles = ["Requester", "Procurement", "Director"];
 const metricUnitFactors = { km: 1000, m: 1 };
 
-const normalizeUomName = (uom) => {
+export const normalizeUomName = (uom) => {
   const normalized = String(uom || "").trim().toLowerCase();
   const aliases = {
     kilometer: "km",
@@ -148,8 +148,53 @@ const normalizeUomName = (uom) => {
     pieces: "piece",
     reels: "reel",
     rolls: "roll",
+    pairs: "pair",
+    pkt: "packet",
+    pkts: "packet",
+    packets: "packet",
   };
   return aliases[normalized] || normalized;
+};
+
+const lengthFactor = (item, unit) => {
+  const normalized = normalizeUomName(unit);
+  if (metricUnitFactors[normalized]) return metricUnitFactors[normalized];
+  if (normalized === item?.cablePackageUnit && Number(item?.cableLengthMeters) > 0) return Number(item.cableLengthMeters);
+  return null;
+};
+
+export const convertItemQuantity = (quantity, fromUom, toUom, item) => {
+  const from = normalizeUomName(fromUom);
+  const to = normalizeUomName(toUom);
+  if (from === to) return Number(quantity);
+  const fromFactor = lengthFactor(item, from);
+  const toFactor = lengthFactor(item, to);
+  if (fromFactor && toFactor) return Number(quantity) * fromFactor / toFactor;
+  return null;
+};
+
+export const getStockUnit = (item, uom) => {
+  const unit = normalizeUomName(uom);
+  if (!unit) throw new Error("Enter a unit of measure.");
+  const units = [item.uom, ...Object.keys(item.unitBalances || {})];
+  return units.find((candidate) => convertItemQuantity(1, unit, candidate, item) !== null) || unit;
+};
+
+export const getStockBalance = (item, unit) => (
+  normalizeUomName(unit) === normalizeUomName(item.uom)
+    ? Number(item.stock)
+    : Number(item.unitBalances?.[normalizeUomName(unit)] || 0)
+);
+
+export const formatStockBalances = (item) => [
+  `${item.stock} ${item.uom}${lengthFactor(item, item.uom) && ["roll", "reel"].includes(normalizeUomName(item.uom)) ? ` (${Number((Number(item.stock) * lengthFactor(item, item.uom)).toFixed(6))} m)` : ""}`,
+  ...Object.entries(item.unitBalances || {}).filter(([, quantity]) => Number(quantity) !== 0)
+    .map(([unit, quantity]) => `${quantity} ${unit}${lengthFactor(item, unit) && ["roll", "reel"].includes(unit) ? ` (${Number((Number(quantity) * lengthFactor(item, unit)).toFixed(6))} m)` : ""}`),
+].join(", ");
+
+const updateStockBalance = (item, unit, quantity) => {
+  if (normalizeUomName(unit) === normalizeUomName(item.uom)) return { ...item, stock: quantity };
+  return { ...item, unitBalances: { ...item.unitBalances, [unit]: quantity } };
 };
 
 export const convertQuantity = (quantity, fromUom, toUom) => {
@@ -321,7 +366,7 @@ export function InventoryProvider({ children }) {
   const [stockMovements, setStockMovements] = useState(() => readStoredList("inventory-stock-movements", []).map((movement) => {
     const item = initialInventory.items.find((entry) => entry.id === movement.itemId);
     const uom = normalizeUomName(movement.uom || item?.uom || "piece");
-    const stockUom = item?.uom || uom;
+    const stockUom = movement.stockUom || item?.uom || uom;
     const receiptOrders = !movement.isPurchase && movement.notes === "Purchase order receipt"
       ? initialInventory.purchaseOrders.filter((order) => (order.orderNumber || order.id) === movement.reference)
       : [];
@@ -339,7 +384,8 @@ export function InventoryProvider({ children }) {
       ...movement,
       ...legacyPurchase,
       uom,
-      quantityInStockUnit: convertQuantity(movement.quantity, uom, stockUom),
+      stockUom,
+      quantityInStockUnit: movement.quantityInStockUnit ?? convertQuantity(movement.quantity, uom, stockUom),
     };
   }));
   const [purchaseRequests, setPurchaseRequests] = useState(() => readStoredList("inventory-purchase-requests", defaultPurchaseRequests));
@@ -532,7 +578,10 @@ export function InventoryProvider({ children }) {
   const updateItem = (itemId, updates) => {
     const existing = items.find((item) => item.id === itemId);
     if (!existing) throw new Error("Inventory item was not found.");
-    const nextUom = String(updates.uom || existing.uom).trim();
+    const nextUom = normalizeUomName(updates.uom || existing.uom);
+    if (nextUom !== existing.uom && Object.prototype.hasOwnProperty.call(existing.unitBalances || {}, nextUom)) {
+      throw new Error("The new stock unit already has a separate balance. Reconcile it before changing the stock unit.");
+    }
     const stock = convertQuantity(updates.stock ?? existing.stock, existing.uom, nextUom);
     const reorderLevel = convertQuantity(updates.reorderLevel ?? existing.reorderLevel, existing.uom, nextUom);
     const unitCost = convertUnitCost(updates.unitCost ?? existing.unitCost, existing.uom, nextUom);
@@ -541,6 +590,12 @@ export function InventoryProvider({ children }) {
       id: itemId,
     };
     setItems((previous) => previous.map((item) => item.id === itemId ? updated : item));
+    if (nextUom !== existing.uom) {
+      setStockMovements((previous) => previous.map((movement) => {
+        if (movement.itemId !== itemId || normalizeUomName(movement.stockUom || existing.uom) !== existing.uom) return movement;
+        return { ...movement, stockUom: nextUom, quantityInStockUnit: convertQuantity(movement.quantityInStockUnit, existing.uom, nextUom) };
+      }));
+    }
     return updated;
   };
 
@@ -566,6 +621,47 @@ export function InventoryProvider({ children }) {
     const restoredItem = { ...existing, archived: false };
     setItems((previous) => previous.map((item) => item.id === itemId ? restoredItem : item));
     return restoredItem;
+  };
+
+  const configureCable = (itemId, cableType, value) => {
+    const item = items.find((entry) => entry.id === itemId && !entry.archived);
+    if (!item) throw new Error("Choose an active inventory item.");
+    if (!["adss", "drop"].includes(cableType)) throw new Error("Choose a cable type.");
+    const length = Number(value);
+    if (!Number.isFinite(length) || length <= 0) throw new Error("Enter a positive length in metres.");
+    const packageUnit = cableType === "adss" ? "roll" : "reel";
+    const configured = { ...item, cableType, cablePackageUnit: packageUnit, cableLengthMeters: length };
+    const changed = item.cablePackageUnit && (item.cablePackageUnit !== packageUnit || Number(item.cableLengthMeters) !== length);
+    if (changed && stockMovements.some((movement) => movement.itemId === item.id
+      && convertItemQuantity(1, movement.uom, movement.stockUom || item.uom, item)
+        !== convertItemQuantity(1, movement.uom, movement.stockUom || item.uom, configured))) {
+      throw new Error("This cable length has already been used for converted movements and cannot be changed without reconciling stock history.");
+    }
+    const sourceUnits = [normalizeUomName(item.uom), ...Object.keys(item.unitBalances || {}).map(normalizeUomName)];
+    const targets = new Map();
+    const keptUnits = [];
+    sourceUnits.forEach((unit) => {
+      const target = keptUnits.find((candidate) => convertItemQuantity(1, unit, candidate, configured) !== null) || unit;
+      targets.set(unit, target);
+      if (!keptUnits.includes(target)) keptUnits.push(target);
+    });
+    let updatedItem = { ...configured, stock: 0, unitBalances: {} };
+    sourceUnits.forEach((unit) => {
+      const target = targets.get(unit);
+      const quantity = convertItemQuantity(getStockBalance(item, unit), unit, target, configured);
+      updatedItem = updateStockBalance(updatedItem, target, getStockBalance(updatedItem, target) + quantity);
+    });
+    setItems((previous) => previous.map((entry) => entry.id === itemId ? updatedItem : entry));
+    setStockMovements((previous) => previous.map((movement) => {
+      if (movement.itemId !== itemId) return movement;
+      const originalUnit = normalizeUomName(movement.stockUom || item.uom);
+      const target = targets.get(originalUnit) || originalUnit;
+      return {
+        ...movement,
+        stockUom: target,
+        quantityInStockUnit: convertItemQuantity(movement.quantityInStockUnit, originalUnit, target, configured),
+      };
+    }));
   };
 
   const addInventoryCategory = (value) => {
@@ -634,14 +730,16 @@ export function InventoryProvider({ children }) {
       throw new Error("Movement quantity must be greater than zero.");
     }
     const movementUom = normalizeUomName(uom || item.uom);
-    const stockQuantity = convertQuantity(movedQuantity, movementUom, item.uom);
-    if (movementType === "out" && stockQuantity > Number(item.stock)) {
-      throw new Error(`Only ${item.stock} ${item.uom} of ${item.name} currently in stock.`);
+    const stockUom = getStockUnit(item, movementUom);
+    const stockQuantity = convertItemQuantity(movedQuantity, movementUom, stockUom, item);
+    const balance = getStockBalance(item, stockUom);
+    if (movementType === "out" && stockQuantity > balance + 1e-9) {
+      throw new Error(`Only ${balance} ${stockUom} of ${item.name} currently in stock.`);
     }
     const purchaseSupplier = isPurchase && movementType === "in" ? inventorySuppliers.find((supplier) => supplier.id === supplierId) : null;
     const purchaseCost = Number(unitCost);
     if (isPurchase && movementType === "in" && (!purchaseSupplier || String(unitCost).trim() === "" || !Number.isFinite(purchaseCost) || purchaseCost < 0)) {
-      throw new Error("Choose a supplier and enter a valid non-negative purchase unit cost.");
+      throw new Error("Choose a supplier and enter a valid non-negative rate.");
     }
 
     return {
@@ -653,6 +751,7 @@ export function InventoryProvider({ children }) {
       date: movementDate,
       quantity: movedQuantity,
       uom: movementUom,
+      stockUom,
       quantityInStockUnit: stockQuantity,
       reference: String(reference || "").trim(),
       notes: String(notes || "").trim(),
@@ -664,7 +763,9 @@ export function InventoryProvider({ children }) {
     const movement = prepareStockMovement(input);
     const quantityChange = movement.movementType === "in" ? movement.quantityInStockUnit : -movement.quantityInStockUnit;
     setItems((previous) => previous.map((entry) => (
-      entry.id === movement.itemId ? { ...entry, stock: Number(entry.stock) + quantityChange } : entry
+      entry.id === movement.itemId
+        ? updateStockBalance(entry, movement.stockUom, Math.max(0, getStockBalance(entry, movement.stockUom) + quantityChange))
+        : entry
     )));
     setStockMovements((previous) => [movement, ...previous]);
     return movement;
@@ -703,18 +804,27 @@ export function InventoryProvider({ children }) {
           availableSuppliers.push(supplier);
           newSuppliers.push(supplier);
         }
-        return prepareStockMovement({ ...row, itemId: item.id, supplierId: supplier.id, movementType: "in", isPurchase: true }, availableItems, availableSuppliers);
+        const movement = prepareStockMovement({ ...row, itemId: item.id, supplierId: supplier.id, movementType: "in", isPurchase: true }, availableItems, availableSuppliers);
+        const itemIndex = availableItems.findIndex((entry) => entry.id === item.id);
+        availableItems[itemIndex] = updateStockBalance(item, movement.stockUom, getStockBalance(item, movement.stockUom) + movement.quantityInStockUnit);
+        return movement;
       } catch (error) {
         throw new Error(`Spreadsheet row ${row.sourceRow ?? index + 1}: ${error.message}`);
       }
     });
     const quantities = new Map();
     movements.forEach((movement) => {
-      quantities.set(movement.itemId, (quantities.get(movement.itemId) || 0) + movement.quantityInStockUnit);
+      const byUnit = quantities.get(movement.itemId) || new Map();
+      byUnit.set(movement.stockUom, (byUnit.get(movement.stockUom) || 0) + movement.quantityInStockUnit);
+      quantities.set(movement.itemId, byUnit);
     });
-    setItems((previous) => [...previous, ...newItems].map((item) => (
-      quantities.has(item.id) ? { ...item, stock: Number(item.stock) + quantities.get(item.id) } : item
-    )));
+    setItems((previous) => [...previous, ...newItems].map((item) => {
+      const adjustments = quantities.get(item.id);
+      if (!adjustments) return item;
+      let updated = item;
+      adjustments.forEach((quantity, unit) => { updated = updateStockBalance(updated, unit, getStockBalance(updated, unit) + quantity); });
+      return updated;
+    }));
     if (newSuppliers.length) setSuppliers((previous) => [...previous, ...newSuppliers]);
     setStockMovements((previous) => [...movements, ...previous]);
     return movements;
@@ -738,22 +848,32 @@ export function InventoryProvider({ children }) {
       const quantity = Number(movement.quantityInStockUnit);
       if (!Number.isFinite(quantity) || quantity <= 0) throw new Error("A stock movement has an invalid quantity.");
       const reverseQuantity = movement.movementType === "in" ? -quantity : quantity;
-      stockAdjustments.set(item.id, (stockAdjustments.get(item.id) || 0) + reverseQuantity);
+      const stockUom = movement.stockUom || item.uom;
+      const byUnit = stockAdjustments.get(item.id) || new Map();
+      byUnit.set(stockUom, (byUnit.get(stockUom) || 0) + reverseQuantity);
+      stockAdjustments.set(item.id, byUnit);
     });
 
     const nextStocks = new Map();
-    stockAdjustments.forEach((adjustment, itemId) => {
+    stockAdjustments.forEach((adjustments, itemId) => {
       const item = items.find((entry) => entry.id === itemId);
-      const nextStock = Number(item.stock) + adjustment;
-      if (nextStock < -1e-9) {
-        throw new Error(`Cannot remove the stock-in movement because only ${item.stock} ${item.uom} remains in stock.`);
-      }
-      nextStocks.set(itemId, Math.max(0, nextStock));
+      const balances = new Map();
+      adjustments.forEach((adjustment, unit) => {
+        const balance = getStockBalance(item, unit);
+        const nextStock = balance + adjustment;
+        if (nextStock < -1e-9) {
+          throw new Error(`Cannot remove the stock-in movement because only ${balance} ${unit} remains in stock.`);
+        }
+        balances.set(unit, Math.max(0, nextStock));
+      });
+      nextStocks.set(itemId, balances);
     });
 
-    setItems((previous) => previous.map((item) => (
-      nextStocks.has(item.id) ? { ...item, stock: nextStocks.get(item.id) } : item
-    )));
+    setItems((previous) => previous.map((item) => {
+      let updated = item;
+      nextStocks.get(item.id)?.forEach((quantity, unit) => { updated = updateStockBalance(updated, unit, quantity); });
+      return updated;
+    }));
     setStockMovements((previous) => previous.filter((movement) => !selectedIds.has(movement.id)));
     return movementsToDelete;
   };
@@ -776,21 +896,30 @@ export function InventoryProvider({ children }) {
     const item = items.find((entry) => entry.id === movement.itemId);
     if (!item) throw new Error("A stock movement item no longer exists.");
     const uom = normalizeUomName(updates.uom || item.uom);
-    const quantityInStockUnit = convertQuantity(quantity, uom, item.uom);
+    const stockUom = getStockUnit(item, uom);
+    const quantityInStockUnit = convertItemQuantity(quantity, uom, stockUom, item);
+    const previousStockUom = movement.stockUom || item.uom;
     const previousQuantity = Number(movement.quantityInStockUnit);
     if (!Number.isFinite(previousQuantity) || previousQuantity <= 0) throw new Error("The existing stock movement has an invalid quantity.");
     const previousChange = movement.movementType === "in" ? previousQuantity : -previousQuantity;
     const nextChange = movement.movementType === "in" ? quantityInStockUnit : -quantityInStockUnit;
-    const nextStock = Number(item.stock) - previousChange + nextChange;
-    if (nextStock < -1e-9) {
-      throw new Error(`This change would make the stock balance for ${item.name} negative. Only ${item.stock} ${item.uom} currently remains.`);
-    }
+    const adjustments = new Map([[previousStockUom, -previousChange]]);
+    adjustments.set(stockUom, (adjustments.get(stockUom) || 0) + nextChange);
+    let updatedItem = item;
+    adjustments.forEach((adjustment, unit) => {
+      const balance = getStockBalance(item, unit);
+      const nextStock = balance + adjustment;
+      if (nextStock < -1e-9) {
+        throw new Error(`This change would make the stock balance for ${item.name} negative. Only ${balance} ${unit} currently remains.`);
+      }
+      updatedItem = updateStockBalance(updatedItem, unit, Math.max(0, nextStock));
+    });
     const purchaseSupplier = movement.movementType === "in" && updates.isPurchase
       ? suppliers.find((supplier) => supplier.id === updates.supplierId)
       : null;
     const purchaseCost = Number(updates.unitCost);
     if (updates.isPurchase && movement.movementType === "in" && (!purchaseSupplier || String(updates.unitCost ?? "").trim() === "" || !Number.isFinite(purchaseCost) || purchaseCost < 0)) {
-      throw new Error("Choose a supplier and enter a valid non-negative purchase unit cost.");
+      throw new Error("Choose a supplier and enter a valid non-negative rate.");
     }
 
     const updatedMovement = {
@@ -798,6 +927,7 @@ export function InventoryProvider({ children }) {
       date: movementDate,
       quantity,
       uom,
+      stockUom,
       quantityInStockUnit,
       reference: String(updates.reference || "").trim(),
       notes: String(updates.notes || "").trim(),
@@ -808,12 +938,22 @@ export function InventoryProvider({ children }) {
       unitCost: purchaseSupplier ? purchaseCost : null,
     };
     setItems((previous) => previous.map((entry) => (
-      entry.id === item.id ? { ...entry, stock: Math.max(0, nextStock) } : entry
+      entry.id === item.id ? updatedItem : entry
     )));
     setStockMovements((previous) => previous.map((entry) => (
       entry.id === movementId ? updatedMovement : entry
     )));
     return updatedMovement;
+  };
+
+  const nextPurchaseOrderNumber = () => {
+    const existingSequence = purchaseOrders.reduce((max, order) => (
+      Math.max(max, getPONumberSequence(order.orderNumber))
+    ), 0);
+    const storedSequence = Number(localStorage.getItem("inventory-po-sequence")) || 0;
+    const nextSequence = Math.max(existingSequence, storedSequence) + 1;
+    localStorage.setItem("inventory-po-sequence", String(nextSequence));
+    return formatPONumber(nextSequence);
   };
 
   const createPurchaseOrder = (supplierId, lineItems, quotationId = null) => {
@@ -851,15 +991,9 @@ export function InventoryProvider({ children }) {
       };
     });
 
-    const existingSequence = purchaseOrders.reduce((max, order) => (
-      Math.max(max, getPONumberSequence(order.orderNumber))
-    ), 0);
-    const storedSequence = Number(localStorage.getItem("inventory-po-sequence")) || 0;
-    const nextSequence = Math.max(existingSequence, storedSequence) + 1;
-    localStorage.setItem("inventory-po-sequence", String(nextSequence));
     const purchaseOrder = {
       id: createId("PO"),
-      orderNumber: formatPONumber(nextSequence),
+      orderNumber: nextPurchaseOrderNumber(),
       supplierId,
       quotationId,
       date: new Date().toISOString().slice(0, 10),
@@ -870,32 +1004,184 @@ export function InventoryProvider({ children }) {
     return purchaseOrder;
   };
 
-  const updatePurchaseOrder = (purchaseOrderId, supplierId, lineItems) => {
+  const splitPurchaseOrder = (purchaseOrderId, selectedLineIndexes) => {
     const existing = purchaseOrders.find((order) => order.id === purchaseOrderId);
     if (!existing) throw new Error("Purchase order was not found.");
-    if (existing.status === "Received") throw new Error("Received purchase orders cannot be edited.");
-    if (existing.quotationId) throw new Error("Purchase orders created from quotations cannot be edited independently.");
-    if (!suppliers.some((supplier) => supplier.id === supplierId)) throw new Error("Choose a valid supplier.");
+    if (existing.status !== "Pending") throw new Error("Only pending purchase orders can be split.");
+    if (supplierInvoices.some((invoice) => invoice.purchaseOrderId === purchaseOrderId)) {
+      throw new Error("Purchase orders linked to supplier invoices cannot be split.");
+    }
+    if (!Array.isArray(selectedLineIndexes)) throw new Error("Select the items to move to a new purchase order.");
+    const selected = new Set(selectedLineIndexes);
+    if (selected.size !== selectedLineIndexes.length || [...selected].some((index) => !Number.isInteger(index) || index < 0 || index >= existing.lineItems.length)) {
+      throw new Error("One or more selected purchase order lines could not be found.");
+    }
+    if (!selected.size || selected.size === existing.lineItems.length) {
+      throw new Error("Select at least one item and leave at least one item on the original order.");
+    }
+    const newOrder = {
+      ...existing,
+      id: createId("PO"),
+      orderNumber: nextPurchaseOrderNumber(),
+      date: new Date().toISOString().slice(0, 10),
+      lineItems: existing.lineItems.filter((_, index) => selected.has(index)),
+    };
+    const remainingOrder = {
+      ...existing,
+      lineItems: existing.lineItems.filter((_, index) => !selected.has(index)),
+    };
+    setPurchaseOrders((previous) => [newOrder, ...previous.map((order) => order.id === purchaseOrderId ? remainingOrder : order)]);
+    return newOrder;
+  };
+
+  const getPurchaseOrderReceipts = (order) => {
+    const reference = order.orderNumber || order.id;
+    const linked = stockMovements.filter((movement) => movement.purchaseOrderId === order.id);
+    const legacy = stockMovements.filter((movement) => !movement.purchaseOrderId
+      && movement.notes === "Purchase order receipt" && movement.reference === reference);
+    if (legacy.length && purchaseOrders.some((entry) => entry.id !== order.id && (entry.orderNumber || entry.id) === reference)) {
+      throw new Error("Receipt records are ambiguous for this purchase order. Reconcile them before changing the order.");
+    }
+    const receipts = [...linked, ...legacy];
+    if (receipts.length !== order.lineItems.length || receipts.some((movement) => movement.movementType !== "in")) {
+      throw new Error("The purchase order's receipt records are missing or incomplete. Reconcile them before changing the order.");
+    }
+    const unused = new Set(receipts.map((movement) => movement.id));
+    return order.lineItems.map((line, index) => {
+      const candidates = receipts.filter((movement) => unused.has(movement.id)
+        && (!movement.purchaseOrderId || movement.purchaseOrderLineIndex === index)
+        && movement.itemId === line.itemId && normalizeUomName(movement.uom) === normalizeUomName(line.uom)
+        && Number(movement.quantity) === Number(line.quantity)
+        && (movement.unitCost == null || Number(movement.unitCost) === Number(line.unitCost)));
+      if (candidates.length !== 1) throw new Error("Receipt records are ambiguous for this purchase order. Reconcile them before changing the order.");
+      unused.delete(candidates[0].id);
+      return candidates[0];
+    });
+  };
+
+  const reconcileReceiptStock = (oldReceipts, newReceipts) => {
+    const adjustments = new Map();
+    const addAdjustment = (movement, sign) => {
+      const item = items.find((entry) => entry.id === movement.itemId);
+      const quantity = Number(movement.quantityInStockUnit);
+      if (!item || !Number.isFinite(quantity) || quantity <= 0) throw new Error("A receipt has an invalid item or quantity.");
+      const unit = movement.stockUom || item.uom;
+      const byUnit = adjustments.get(item.id) || new Map();
+      byUnit.set(unit, (byUnit.get(unit) || 0) + sign * quantity);
+      adjustments.set(item.id, byUnit);
+    };
+    oldReceipts.forEach((movement) => addAdjustment(movement, -1));
+    newReceipts.forEach((movement) => addAdjustment(movement, 1));
+    return items.map((item) => {
+      let updatedItem = item;
+      adjustments.get(item.id)?.forEach((adjustment, unit) => {
+        const balance = getStockBalance(item, unit) + adjustment;
+        if (!Number.isFinite(balance) || balance < -1e-9) throw new Error(`This change would make the stock balance for ${item.name} negative or invalid.`);
+        updatedItem = updateStockBalance(updatedItem, unit, Math.max(0, balance));
+      });
+      return updatedItem;
+    });
+  };
+
+  const updatePurchaseOrder = (purchaseOrderId, supplierId, lineItems, date, invoiceUpdates) => {
+    const existing = purchaseOrders.find((order) => order.id === purchaseOrderId);
+    if (!existing) throw new Error("Purchase order was not found.");
+    const supplier = suppliers.find((entry) => entry.id === supplierId);
+    if (!supplier) throw new Error("Choose a valid supplier.");
     if (!Array.isArray(lineItems) || !lineItems.length) throw new Error("Add at least one item to the purchase order.");
+    const orderDate = String(date || "").trim();
+    const parsedDate = new Date(`${orderDate}T00:00:00Z`);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(orderDate) || Number.isNaN(parsedDate.getTime()) || parsedDate.toISOString().slice(0, 10) !== orderDate) {
+      throw new Error("Enter a valid purchase order date.");
+    }
 
     const normalizedLineItems = lineItems.map((line) => {
       const quantity = Number(line.quantity);
       const unitCost = Number(line.unitCost);
       const item = items.find((entry) => entry.id === line.itemId);
-      if (!item || item.archived) throw new Error("Choose an active inventory item for every purchase order line.");
+      const originalLine = existing.lineItems[line.sourceLineIndex];
+      if (!item || (item.archived && originalLine?.itemId !== item.id)) throw new Error("Choose an active inventory item for every new purchase order line.");
       const sourceUom = line.uom || item.uom;
       if (!Number.isFinite(quantity) || quantity <= 0 || !Number.isFinite(unitCost) || unitCost < 0) {
         throw new Error("Each purchase order line needs a positive quantity and a valid unit cost.");
       }
       return {
-        ...line,
+        itemId: line.itemId,
         quantity: convertQuantity(quantity, sourceUom, item.uom),
         unitCost: convertUnitCost(unitCost, sourceUom, item.uom),
         uom: item.uom,
       };
     });
 
-    const updated = { ...existing, supplierId, lineItems: normalizedLineItems };
+    const linkedInvoices = supplierInvoices.filter((invoice) => invoice.purchaseOrderId === purchaseOrderId);
+    if (!Array.isArray(invoiceUpdates) || invoiceUpdates.length !== linkedInvoices.length
+      || new Set(invoiceUpdates.map((invoice) => invoice.id)).size !== linkedInvoices.length
+      || linkedInvoices.some((invoice) => !invoiceUpdates.some((entry) => entry.id === invoice.id))) {
+      throw new Error("Linked invoices changed. Reopen the purchase order and try again.");
+    }
+    const updatedInvoices = linkedInvoices.map((invoice) => {
+      const changes = invoiceUpdates.find((entry) => entry.id === invoice.id);
+      const number = String(changes.number || "").trim();
+      const invoiceDate = String(changes.date || "").trim();
+      const parsedInvoiceDate = new Date(`${invoiceDate}T00:00:00Z`);
+      if (!number) throw new Error("Enter a number for every linked invoice.");
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(invoiceDate) || Number.isNaN(parsedInvoiceDate.getTime()) || parsedInvoiceDate.toISOString().slice(0, 10) !== invoiceDate) {
+        throw new Error("Enter a valid date for every linked invoice.");
+      }
+      const amountCents = toCents(changes.amount);
+      if (amountCents < invoice.paidCents) throw new Error(`Invoice ${invoice.number} cannot be reduced below its recorded payments.`);
+      return { ...invoice, supplierId, supplier: supplier.name, number, date: invoiceDate, amountCents };
+    });
+    const otherInvoices = supplierInvoices.filter((invoice) => invoice.purchaseOrderId !== purchaseOrderId);
+    const allInvoices = [...otherInvoices, ...updatedInvoices];
+    if (updatedInvoices.some((invoice) => allInvoices.some((other) => other.id !== invoice.id
+      && other.supplierId === invoice.supplierId && other.number.toLowerCase() === invoice.number.toLowerCase()))) {
+      throw new Error("An invoice with this number already exists for the selected supplier.");
+    }
+
+    let updatedItems = null;
+    let nextMovements = null;
+    if (existing.status === "Received") {
+      const reference = existing.orderNumber || existing.id;
+      const oldReceipts = getPurchaseOrderReceipts(existing);
+      const sourceIndexes = lineItems.map((line) => line.sourceLineIndex).filter((index) => index != null);
+      if (new Set(sourceIndexes).size !== sourceIndexes.length
+        || sourceIndexes.some((index) => !Number.isInteger(index) || index < 0 || index >= oldReceipts.length)) {
+        throw new Error("Purchase order lines changed. Reopen the order and try again.");
+      }
+      const receiptDates = [...new Set(oldReceipts.map((movement) => movement.date))];
+      if (lineItems.some((line) => line.sourceLineIndex == null) && receiptDates.length !== 1) {
+        throw new Error("The order has multiple receipt dates. Reconcile them before adding an item.");
+      }
+      const newReceipts = normalizedLineItems.map((line, index) => {
+        const previous = oldReceipts[lineItems[index].sourceLineIndex];
+        const movement = prepareStockMovement({
+          ...line, movementType: "in", date: previous?.date || receiptDates[0],
+          reference, notes: "Purchase order receipt", isPurchase: true, supplierId,
+        });
+        return {
+          ...movement,
+          id: previous?.id || movement.id,
+          category: previous?.itemId === line.itemId ? previous.category || movement.category : movement.category,
+          purchaseOrderId: existing.id,
+          purchaseOrderLineIndex: index,
+        };
+      });
+      updatedItems = reconcileReceiptStock(oldReceipts, newReceipts);
+      const receiptIds = new Set(oldReceipts.map((movement) => movement.id));
+      nextMovements = [...newReceipts, ...stockMovements.filter((movement) => !receiptIds.has(movement.id))];
+    }
+
+    const updated = {
+      ...existing, supplierId, date: orderDate, lineItems: normalizedLineItems,
+      quotationId: supplierId === existing.supplierId ? existing.quotationId : null,
+    };
+    if (updatedItems) setItems(updatedItems);
+    if (nextMovements) setStockMovements(nextMovements);
+    if (updatedInvoices.length) {
+      const byId = new Map(updatedInvoices.map((invoice) => [invoice.id, invoice]));
+      setSupplierInvoices((previous) => previous.map((invoice) => byId.get(invoice.id) || invoice));
+    }
     setPurchaseOrders((previous) => previous.map((order) => order.id === purchaseOrderId ? updated : order));
     return updated;
   };
@@ -906,11 +1192,37 @@ export function InventoryProvider({ children }) {
     if (!selectedIds.size || selectedOrders.length !== selectedIds.size) {
       throw new Error("One or more purchase orders could not be found.");
     }
-    if (selectedOrders.some((order) => order.status === "Received")) {
-      throw new Error("Received purchase orders cannot be deleted because their stock receipts must be preserved.");
+    const oldReceipts = selectedOrders.flatMap((order) => {
+      if (order.status === "Received") return getPurchaseOrderReceipts(order);
+      const reference = order.orderNumber || order.id;
+      if (stockMovements.some((movement) => movement.purchaseOrderId === order.id
+        || (!movement.purchaseOrderId && movement.notes === "Purchase order receipt" && movement.reference === reference))) {
+        throw new Error("An unreceived purchase order has receipt records. Reconcile them before deletion.");
+      }
+      return [];
+    });
+    const updatedItems = reconcileReceiptStock(oldReceipts, []);
+    const receiptIds = new Set(oldReceipts.map((movement) => movement.id));
+    const quotationIds = new Set(selectedOrders.map((order) => order.quotationId).filter(Boolean));
+    const unusedQuotationIds = new Set([...quotationIds].filter((id) => !purchaseOrders.some(
+      (order) => !selectedIds.has(order.id) && order.quotationId === id
+    )));
+    const removedQuotations = quotations.filter((quotation) => unusedQuotationIds.has(quotation.id));
+    const remainingQuotations = quotations.filter((quotation) => !unusedQuotationIds.has(quotation.id));
+    const affectedRequests = new Set(removedQuotations.map((quotation) => quotation.prId).filter(Boolean));
+    if (oldReceipts.length) {
+      setItems(updatedItems);
+      setStockMovements((previous) => previous.filter((movement) => !receiptIds.has(movement.id)));
     }
-    if (selectedOrders.some((order) => order.quotationId)) {
-      throw new Error("Purchase orders created from quotations cannot be deleted independently.");
+    setSupplierInvoices((previous) => previous.filter((invoice) => !selectedIds.has(invoice.purchaseOrderId)));
+    if (removedQuotations.length) {
+      setQuotations(remainingQuotations);
+      setPurchaseRequests((previous) => previous.map((request) => (
+        affectedRequests.has(request.id) && request.status === "Quoted"
+        && !remainingQuotations.some((quotation) => quotation.prId === request.id && ["Submitted", "Selected"].includes(quotation.status))
+          ? { ...request, status: "Approved" }
+          : request
+      )));
     }
     setPurchaseOrders((previous) => previous.filter((order) => !selectedIds.has(order.id)));
     return selectedOrders;
@@ -1168,7 +1480,7 @@ export function InventoryProvider({ children }) {
         : item
     )));
     const movementDate = new Date().toISOString().slice(0, 10);
-    const receiptMovements = purchaseOrder.lineItems.map((line) => {
+    const receiptMovements = purchaseOrder.lineItems.map((line, index) => {
       const item = items.find((entry) => entry.id === line.itemId);
       return {
         id: createId("MOV"),
@@ -1182,6 +1494,8 @@ export function InventoryProvider({ children }) {
         quantityInStockUnit: convertQuantity(line.quantity, line.uom || item.uom, item.uom),
         reference: purchaseOrder.orderNumber || purchaseOrder.id,
         notes: "Purchase order receipt",
+        purchaseOrderId: purchaseOrder.id,
+        purchaseOrderLineIndex: index,
         isPurchase: true,
         supplierId: supplier.id,
         supplier: supplier.name,
@@ -1225,6 +1539,7 @@ export function InventoryProvider({ children }) {
     updateItem,
     deleteItem,
     restoreItem,
+    configureCable,
     addInventoryTransaction,
     importInventoryTransactions,
     recordStockMovement,
@@ -1240,6 +1555,7 @@ export function InventoryProvider({ children }) {
     deleteQuotations,
     convertQuotationToPO,
     createPurchaseOrder,
+    splitPurchaseOrder,
     updatePurchaseOrder,
     deletePurchaseOrders,
     receivePurchaseOrder,

@@ -167,8 +167,8 @@ function App() {
                   <Route path="/inventory/purchase-requests" element={user?.apiAuthenticated ? <AlwenOperations user={user} initialTab="requests" /> : <PurchaseRequests />} />
                   <Route path="/inventory/quotations" element={user?.apiAuthenticated ? <AlwenOperations user={user} initialTab="requests" /> : <Quotations />} />
                   <Route path="/inventory/purchase-orders" element={user?.apiAuthenticated ? <AlwenOperations user={user} initialTab="orders" /> : <InventorySubmenu section="purchase-orders" />} />
-                  <Route path="/inventory/stock-in" element={user?.apiAuthenticated ? <AlwenOperations user={user} initialTab="orders" /> : <InventorySubmenu section="stock-in" />} />
-                  <Route path="/inventory/stock-out" element={user?.apiAuthenticated ? <AlwenOperations user={user} initialTab="stock" /> : <InventorySubmenu section="stock-out" />} />
+                  <Route path="/inventory/stock-in" element={user?.apiAuthenticated ? <AlwenOperations user={user} initialTab="orders" /> : <InventorySubmenu section="stock-in" user={user} />} />
+                  <Route path="/inventory/stock-out" element={user?.apiAuthenticated ? <AlwenOperations user={user} initialTab="stock" /> : <InventorySubmenu section="stock-out" user={user} />} />
                   <Route path="/purchase" element={user?.apiAuthenticated ? <AlwenOperations user={user} initialTab="requests" /> : <Purchase orders={orders} setOrders={setOrders} setInventory={setInventory} purchases={purchases} setPurchases={setPurchases} user={user} pushNotification={pushNotification} />} />
                   <Route path="/test" element={<TestFlows user={user} setUser={setUser} orders={orders} setOrders={setOrders} purchases={purchases} setPurchases={setPurchases} inventory={inventory} setInventory={setInventory} pushNotification={pushNotification} />} />
                   <Route path="/reporting" element={user?.apiAuthenticated ? <Navigate to="/alwen/reports" replace /> : <Reporting />} />

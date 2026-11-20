@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from "react";
 import PrintHeader from "../components/PrintHeader";
-import { useInventory } from "../contexts/InventoryContext";
+import { formatStockBalances, useInventory } from "../contexts/InventoryContext";
 import { formatKsh } from "../utils/currency";
 import "../styles/Pages.css";
 
@@ -104,7 +104,7 @@ export default function Reporting() {
             <section className="page-card">
               <p className="stat-title">Inventory Value</p>
               <strong className="stat-value">{formatKsh(inventoryValue)}</strong>
-              <p className="panel-copy">{lowStockCount} active items at or below reorder level</p>
+              <p className="panel-copy">{lowStockCount} active items at or below their main-unit reorder level. Separate unit balances are not valued.</p>
             </section>
           </div>
 
@@ -214,6 +214,7 @@ export default function Reporting() {
       {reportType === "inventory" ? (
         <section className="page-card">
           <h2 className="panel-title">Inventory valuation</h2>
+          <p className="panel-copy">Stock value and reorder levels use the main stock unit; separate unit balances are not valued.</p>
           <div className="table-scroll">
             <table className="data-table">
               <thead><tr><th>SKU</th><th>Item</th><th>Category</th><th>Stock (UOM)</th><th>Reorder level (UOM)</th><th>Unit cost</th><th>Stock value</th><th>Status</th></tr></thead>
@@ -225,7 +226,7 @@ export default function Reporting() {
                       <td>{item.sku}</td>
                       <td>{item.name}</td>
                       <td>{item.category || "General Materials"}</td>
-                      <td>{stock} {item.uom}</td>
+                      <td>{formatStockBalances(item)}</td>
                       <td>{item.reorderLevel} {item.uom}</td>
                       <td>{formatKsh(item.unitCost, true)}</td>
                       <td>{formatKsh(stock * numberOrZero(item.unitCost), true)}</td>

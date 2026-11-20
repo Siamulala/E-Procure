@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import PrintHeader from "../components/PrintHeader";
 import RecordActions from "../components/RecordActions";
 import SpreadsheetImport from "../components/SpreadsheetImport";
+import CableConfiguration from "../components/CableConfiguration";
 import { useInventory } from "../contexts/InventoryContext";
 import { formatKsh } from "../utils/currency";
 import { canRoleViewMenu } from "../utils/menuAccess";
@@ -43,6 +44,7 @@ export default function InventoryStock({ user }) {
   const [categoryToAssign, setCategoryToAssign] = useState("");
   const [categoryFeedback, setCategoryFeedback] = useState({ error: "", message: "" });
   const [categoriesOpen, setCategoriesOpen] = useState(false);
+  const [cableSettingsOpen, setCableSettingsOpen] = useState(false);
   const itemCategories = new Map(items.map((item) => [item.id, item.category]));
   const movements = stockMovements.filter((movement) => movement.movementType === "in")
     .map((movement) => ({ ...movement, category: movement.category || itemCategories.get(movement.itemId) || "" }));
@@ -64,7 +66,7 @@ export default function InventoryStock({ user }) {
   const hasOrderReceipt = selected.some((movement) => movement.notes === "Purchase order receipt");
   const editingItem = items.find((item) => item.id === editing?.itemId);
   const unitOptions = editingItem
-    ? ["km", "m"].includes(String(editingItem.uom).toLowerCase()) ? ["km", "m"] : [editingItem.uom]
+    ? [...new Set([editingItem.uom, editing.uom, ...Object.keys(editingItem.unitBalances || {}), ...(editingItem.cablePackageUnit ? [editingItem.cablePackageUnit, "km", "m"] : []), ...(["km", "m"].includes(editingItem.uom) ? ["km", "m"] : [])])]
     : [];
   const purchaseTotal = records.reduce((sum, movement) => (
     sum + (movement.isPurchase ? Number(movement.quantity) * Number(movement.unitCost) : 0)
@@ -162,7 +164,7 @@ export default function InventoryStock({ user }) {
           <label><input type="checkbox" checked={editing.isPurchase} onChange={(event) => setEditing({ ...editing, isPurchase: event.target.checked })} /> Purchased stock</label>
           {editing.isPurchase ? <>
             <label>Purchase supplier<select className="input-field" value={editing.supplierId} onChange={(event) => setEditing({ ...editing, supplierId: event.target.value })} required><option value="">Select supplier</option>{suppliers.map((supplier) => <option key={supplier.id} value={supplier.id}>{supplier.name}</option>)}</select></label>
-            <label>Purchase unit cost (KSh per selected UOM)<input className="input-field" type="number" min="0" step="any" value={editing.unitCost} onChange={(event) => setEditing({ ...editing, unitCost: event.target.value })} required /></label>
+            <label>Rate (KSh per selected UOM)<input className="input-field" type="number" min="0" step="any" value={editing.unitCost} onChange={(event) => setEditing({ ...editing, unitCost: event.target.value })} required /></label>
           </> : null}
           <button className="primary-btn" type="submit">Save changes</button>
           <button className="secondary-btn" type="button" onClick={() => { setEditing(null); setError(""); }}>Cancel edit</button>
@@ -184,8 +186,10 @@ export default function InventoryStock({ user }) {
             onEdit={canManageStock ? startEdit : undefined} onDelete={canManageStock ? deleteSelected : undefined}
             canEdit={!hasOrderReceipt} canDelete={!hasOrderReceipt}
             onManageCategories={canManageStock ? () => setCategoriesOpen(true) : undefined}
+            onConfigureCable={canManageStock ? () => setCableSettingsOpen(true) : undefined}
             onUpload={canManageStock ? () => { setEditing(null); setError(""); setMessage(""); setImportMessage(""); setImportOpen(true); } : undefined} />
         </div>
+        {cableSettingsOpen && canManageStock ? <CableConfiguration onClose={() => setCableSettingsOpen(false)} /> : null}
         {hasOrderReceipt ? <p className="panel-copy no-print">Purchase-order receipts cannot be edited or deleted independently of their order; their category can still be changed.</p> : null}
         {canManageStock && categoriesOpen ? <section className="no-print">
           <div className="panel-heading"><h3 className="panel-title">Manage categories</h3><button className="secondary-btn" type="button" onClick={() => setCategoriesOpen(false)}>Close categories</button></div>

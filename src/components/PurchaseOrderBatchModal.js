@@ -31,7 +31,6 @@ function getExportRows(orders, suppliers, items, includeVat) {
         "PO Number": order.orderNumber || order.id,
         Supplier: supplier?.name || "Unknown supplier",
         Date: order.date,
-        Status: order.status,
         SKU: item?.sku || "N/A",
         Item: item?.name || "Unknown item",
         Quantity: Number(line.quantity),
@@ -102,8 +101,7 @@ export default function PurchaseOrderBatchModal({ orders, onClose }) {
         pdf.text(supplier?.name || "Unknown supplier", 16, y + 7);
         pdf.text(supplier?.email || "", 16, y + 13);
         pdf.text(`Issue date: ${order.date || "—"}`, 110, y + 7);
-        pdf.text(`Status: ${order.status}`, 110, y + 13);
-        if (order.quotationId) pdf.text(`Quotation ref: ${order.quotationId}`, 110, y + 19);
+        if (order.quotationId) pdf.text(`Quotation ref: ${order.quotationId}`, 110, y + 13);
 
         y += 34;
         const columns = [16, 28, 54, 118, 142, 166];

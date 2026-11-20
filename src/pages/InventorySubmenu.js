@@ -3,8 +3,10 @@ import * as XLSX from "xlsx";
 import PrintHeader from "../components/PrintHeader";
 import PurchaseOrderBatchModal from "../components/PurchaseOrderBatchModal";
 import RecordActions from "../components/RecordActions";
-import { useInventory } from "../contexts/InventoryContext";
+import CableConfiguration from "../components/CableConfiguration";
+import { convertItemQuantity, formatStockBalances, useInventory } from "../contexts/InventoryContext";
 import { formatKsh } from "../utils/currency";
+import { canRoleViewMenu } from "../utils/menuAccess";
 import {
   normalizeInventoryTransaction,
   parseInventoryTransactionRows,
@@ -431,7 +433,7 @@ function ItemsView() {
           {editingItemId ? <button className="secondary-btn" type="button" onClick={cancelEdit}>Cancel edit</button> : null}
         </form>
         <datalist id="inventory-uom-options">
-          {["km", "m", "reel", "roll", "piece"].map((unit) => <option key={unit} value={unit} />)}
+          {["km", "m", "reel", "roll", "piece", "pair", "packet"].map((unit) => <option key={unit} value={unit} />)}
         </datalist>
         <p className="panel-copy">Stock quantity, reorder level, and unit cost use the selected stock unit. Metres and kilometres convert when recording stock movements.</p>
         <Feedback error={error} message={message} />
@@ -532,7 +534,7 @@ function ItemsView() {
                   disabled={!activeItems.length}
                 />
               </th>
-              <th>SKU</th><th>Item</th><th>Category</th><th>Unit cost</th><th>Stock (UOM)</th><th>Reorder level (UOM)</th><th>Status</th>
+              <th>SKU</th><th>Item</th><th>Category</th><th>Unit cost</th><th>Stock (UOM)</th><th>Reorder level (UOM)</th><th>Main unit status</th>
             </tr>
           </thead>
           <tbody>
@@ -551,7 +553,7 @@ function ItemsView() {
                     />
                   </td>
                   <td>{item.sku}</td><td>{item.name}</td><td>{item.category || "General Materials"}</td><td>{formatKsh(item.unitCost, true)}</td>
-                  <td>{item.stock} {item.uom}</td><td>{item.reorderLevel} {item.uom}</td>
+                  <td>{formatStockBalances(item)}</td><td>{item.reorderLevel} {item.uom}</td>
                   <td style={{ color: isLow ? "#b91c1c" : "#15803d", fontWeight: 600 }}>{isLow ? "Reorder" : "In stock"}</td>
                 </tr>
               );
@@ -571,7 +573,7 @@ function ItemsView() {
               {archivedItems.map((item) => (
                 <tr key={item.id}>
                   <td>{item.sku}</td><td>{item.name}</td><td>{item.category || "General Materials"}</td>
-                  <td>{formatKsh(item.unitCost, true)}</td><td>{item.stock} {item.uom}</td><td>{item.reorderLevel} {item.uom}</td>
+                  <td>{formatKsh(item.unitCost, true)}</td><td>{formatStockBalances(item)}</td><td>{item.reorderLevel} {item.uom}</td>
                   <td><button className="secondary-btn" type="button" onClick={() => unarchiveItem(item)} aria-label={`Restore ${item.name}`}>Restore</button></td>
                 </tr>
               ))}
@@ -661,8 +663,8 @@ function ItemsView() {
   );
 }
 
-function StockMovementView({ movementType }) {
-  const { items, suppliers, stockMovements, recordStockMovement, updateStockMovement, deleteStockMovements } = useInventory();
+function StockMovementView({ movementType, user }) {
+  const { items, suppliers, stockMovements, roleMenuPermissions, recordStockMovement, updateStockMovement, deleteStockMovements } = useInventory();
   const activeItems = items.filter((item) => !item.archived);
   const [selectedIds, setSelectedIds] = useState([]);
   const [editingMovementId, setEditingMovementId] = useState(null);
@@ -679,15 +681,15 @@ function StockMovementView({ movementType }) {
   });
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
+  const [cableSettingsOpen, setCableSettingsOpen] = useState(false);
   const title = movementType === "in" ? "Stock in" : "Stock out";
+  const canManageStock = canRoleViewMenu(user?.role, "/inventory/stock-in", roleMenuPermissions);
   const movements = stockMovements.filter((movement) => movement.movementType === movementType);
   const selectableMovements = movements.filter((movement) => movement.notes !== "Purchase order receipt");
   const selectedMovements = selectableMovements.filter((movement) => selectedIds.includes(movement.id));
   const selectedItem = items.find((item) => item.id === form.itemId);
   const movementUnitOptions = selectedItem
-    ? ["km", "m"].includes(String(selectedItem.uom).toLowerCase())
-      ? ["km", "m"]
-      : [selectedItem.uom]
+    ? [...new Set([selectedItem.uom, ...Object.keys(selectedItem.unitBalances || {}), ...(selectedItem.cablePackageUnit ? [selectedItem.cablePackageUnit, "km", "m"] : []), ...(movementType === "in" ? ["piece", "pair", "packet", "roll", "reel", "km", "m"] : []), ...(["km", "m"].includes(selectedItem.uom) ? ["km", "m"] : [])])]
     : [];
 
   const submit = (event) => {
@@ -695,6 +697,8 @@ function StockMovementView({ movementType }) {
     setError("");
     setMessage("");
     try {
+      if (movementType === "in" && selectedItem && convertItemQuantity(1, form.uom, selectedItem.uom, selectedItem) === null
+        && !window.confirm(`Record ${form.uom} as a separate stock balance for ${selectedItem.name}?`)) return;
       if (editingMovementId) {
         updateStockMovement(editingMovementId, form);
         setMessage(`${title} movement updated.`);
@@ -742,7 +746,7 @@ function StockMovementView({ movementType }) {
     <>
       <section className="page-card no-print">
         <h2 className="panel-title">{editingMovementId ? `Edit ${title.toLowerCase()} movement` : `Record ${title.toLowerCase()}`}</h2>
-        <p className="panel-copy">Stock is kept in each item's unit. Metres and kilometres convert automatically; reels, rolls, and pieces use their item's listed unit.</p>
+        <p className="panel-copy">Units without a known conversion are kept in separate balances. Configure cable lengths to issue rolls or reels in metres.</p>
         <form onSubmit={submit} className="form-row" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))" }}>
           <label>Item
             <select className="input-field" value={form.itemId} onChange={(event) => {
@@ -751,7 +755,7 @@ function StockMovementView({ movementType }) {
             }} required disabled={Boolean(editingMovementId)}>
               <option value="">Select item</option>
               {items.filter((item) => !item.archived || item.id === form.itemId).map((item) => (
-                <option key={item.id} value={item.id}>{item.name}{item.archived ? " (Archived)" : ""} ({item.stock} {item.uom} in stock)</option>
+                <option key={item.id} value={item.id}>{item.name}{item.archived ? " (Archived)" : ""} ({formatStockBalances(item)} in stock)</option>
               ))}
             </select>
           </label>
@@ -770,7 +774,7 @@ function StockMovementView({ movementType }) {
               <label>Purchase supplier<select className="input-field" value={form.supplierId} onChange={(event) => setForm({ ...form, supplierId: event.target.value })} required>
                 <option value="">Select supplier</option>{suppliers.map((supplier) => <option key={supplier.id} value={supplier.id}>{supplier.name}</option>)}
               </select></label>
-              <label>Purchase unit cost (KSh per selected UOM)<input className="input-field" type="number" min="0" step="0.01" value={form.unitCost} onChange={(event) => setForm({ ...form, unitCost: event.target.value })} required /></label>
+              <label>Rate (KSh per selected UOM)<input className="input-field" type="number" min="0" step="0.01" value={form.unitCost} onChange={(event) => setForm({ ...form, unitCost: event.target.value })} required /></label>
             </> : null}
           </> : null}
           <button className="primary-btn" type="submit">{editingMovementId ? "Save changes" : `Record ${title.toLowerCase()}`}</button>
@@ -781,6 +785,7 @@ function StockMovementView({ movementType }) {
             }}>Cancel edit</button>
           ) : null}
         </form>
+        {selectedItem ? <p className="panel-copy">Current balance: {formatStockBalances(selectedItem)}</p> : null}
         <Feedback error={error} message={message} />
       </section>
 
@@ -797,7 +802,9 @@ function StockMovementView({ movementType }) {
           recordName={`${movementType === "in" ? "stock-in" : "stock-out"}-movements`}
           onEdit={startEdit}
           onDelete={deleteSelected}
+          onConfigureCable={canManageStock ? () => setCableSettingsOpen(true) : undefined}
         />
+        {cableSettingsOpen && canManageStock ? <CableConfiguration onClose={() => setCableSettingsOpen(false)} /> : null}
         <table className="data-table">
           <thead>
             <tr>
@@ -850,15 +857,21 @@ function PurchaseOrdersView() {
     suppliers,
     items,
     purchaseOrders,
+    supplierInvoices,
+    quotations,
     createPurchaseOrder,
+    splitPurchaseOrder,
     updatePurchaseOrder,
     deletePurchaseOrders,
     receivePurchaseOrder,
   } = useInventory();
   const activeItems = items.filter((item) => !item.archived);
+  const formRef = useRef(null);
   const [form, setForm] = useState({
     supplierId: "",
     lineItems: [{ itemId: "", quantity: "", unitCost: "" }],
+    date: "",
+    invoices: [],
   });
   const [selectedSupplierId, setSelectedSupplierId] = useState(
     () => purchaseOrders.find((order) => order.status !== "Received")?.supplierId || ""
@@ -866,18 +879,39 @@ function PurchaseOrdersView() {
   const [selectedPOIds, setSelectedPOIds] = useState([]);
   const [ordersToPrint, setOrdersToPrint] = useState([]);
   const [editingOrderId, setEditingOrderId] = useState(null);
+  const [splittingOrderId, setSplittingOrderId] = useState(null);
+  const [selectedLineIndexes, setSelectedLineIndexes] = useState([]);
+  const [splitError, setSplitError] = useState("");
+  const [splitMessage, setSplitMessage] = useState(null);
+  const [actionError, setActionError] = useState("");
+  const [actionMessage, setActionMessage] = useState("");
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const canCreate = currentRole === "Procurement";
   const canReceive = currentRole === "Procurement" || currentRole === "Director";
+  const displayedOrders = selectedSupplierId
+    ? purchaseOrders.filter((order) => order.supplierId === selectedSupplierId)
+    : purchaseOrders;
   const printableOrdersForSupplier = purchaseOrders.filter(
     (order) => order.supplierId === selectedSupplierId && order.status !== "Received"
   );
+  const selectedRecords = displayedOrders.filter((order) => selectedPOIds.includes(order.id));
   const selectedOrders = printableOrdersForSupplier.filter((order) => selectedPOIds.includes(order.id));
+  const splittingOrder = purchaseOrders.find((order) => order.id === splittingOrderId);
+  const formatOrderForExport = (order) => {
+    const formatted = { ...order };
+    delete formatted.status;
+    return formatted;
+  };
 
   const changeSupplier = (supplierId) => {
     setSelectedSupplierId(supplierId);
     setSelectedPOIds([]);
+    setSplittingOrderId(null);
+    setSplitError("");
+    setSplitMessage(null);
+    setActionError("");
+    setActionMessage("");
   };
 
   const toggleOrderSelection = (orderId) => {
@@ -889,7 +923,10 @@ function PurchaseOrdersView() {
   const toggleSelectAllForSupplier = () => {
     const allSelected = printableOrdersForSupplier.length > 0
       && printableOrdersForSupplier.every((order) => selectedPOIds.includes(order.id));
-    setSelectedPOIds(allSelected ? [] : printableOrdersForSupplier.map((order) => order.id));
+    const printableIds = printableOrdersForSupplier.map((order) => order.id);
+    setSelectedPOIds((current) => allSelected
+      ? current.filter((id) => !printableIds.includes(id))
+      : [...new Set([...current, ...printableIds])]);
   };
 
   const updateFormLine = (index, updates) => {
@@ -921,43 +958,101 @@ function PurchaseOrdersView() {
     setMessage("");
     try {
       if (editingOrderId) {
-        updatePurchaseOrder(editingOrderId, form.supplierId, form.lineItems);
+        const order = purchaseOrders.find((entry) => entry.id === editingOrderId);
+        const supplierChanged = order && order.supplierId !== form.supplierId;
+        if ((order?.status === "Received" || (supplierChanged && (order.quotationId || form.invoices.length)))
+          && !window.confirm("Save these changes? Received stock and linked invoices will be updated, and changing the supplier removes the quotation link.")) return;
+        updatePurchaseOrder(editingOrderId, form.supplierId, form.lineItems, form.date, form.invoices);
         setMessage("Purchase order updated.");
       } else {
         createPurchaseOrder(form.supplierId, form.lineItems);
         setMessage("Purchase order created.");
       }
+      changeSupplier(form.supplierId);
       setEditingOrderId(null);
-      setForm({ supplierId: "", lineItems: [{ itemId: "", quantity: "", unitCost: "" }] });
+      setForm({ supplierId: "", lineItems: [{ itemId: "", quantity: "", unitCost: "" }], date: "", invoices: [] });
     } catch (submitError) {
       setError(submitError.message);
     }
   };
 
   const startEdit = (purchaseOrder) => {
+    if (editingOrderId === purchaseOrder.id) {
+      formRef.current?.scrollIntoView?.({ behavior: "smooth", block: "start" });
+      return;
+    }
+    if (editingOrderId && !window.confirm("Discard the current unsaved purchase order changes and edit another order?")) return;
+    setSplittingOrderId(null);
+    setSplitMessage(null);
     setEditingOrderId(purchaseOrder.id);
     setForm({
       supplierId: purchaseOrder.supplierId,
-      lineItems: purchaseOrder.lineItems.map((line) => ({
+      date: purchaseOrder.date,
+      lineItems: purchaseOrder.lineItems.map((line, index) => ({
         itemId: line.itemId,
         quantity: String(line.quantity),
         unitCost: String(line.unitCost),
         uom: line.uom,
+        sourceLineIndex: index,
+      })),
+      invoices: supplierInvoices.filter((invoice) => invoice.purchaseOrderId === purchaseOrder.id).map((invoice) => ({
+        id: invoice.id,
+        number: invoice.number,
+        date: invoice.date,
+        amount: (invoice.amountCents / 100).toFixed(2),
       })),
     });
     setError("");
     setMessage("");
+    formRef.current?.scrollIntoView?.({ behavior: "smooth", block: "start" });
+  };
+
+  const splitSelectedItems = () => {
+    setSplitError("");
+    if (!selectedLineIndexes.length || selectedLineIndexes.length === splittingOrder.lineItems.length) {
+      setSplitError("Select at least one item and leave at least one item on the original order.");
+      return;
+    }
+    if (!window.confirm("Move the selected items to a new PO? The original PO will change, so previously shared copies may no longer match.")) return;
+    try {
+      const newOrder = splitPurchaseOrder(splittingOrder.id, selectedLineIndexes);
+      setSplittingOrderId(null);
+      setSelectedLineIndexes([]);
+      setSelectedSupplierId(newOrder.supplierId);
+      setSelectedPOIds([newOrder.id]);
+      setSplitMessage({
+        orderId: splittingOrder.id,
+        text: `${newOrder.orderNumber} created and selected for documents. Remaining items stay on ${splittingOrder.orderNumber || splittingOrder.id}.`,
+      });
+    } catch (splitFailure) {
+      setSplitError(splitFailure.message);
+    }
   };
 
   const deleteSelectedOrders = (selectedRecords) => {
-    if (!window.confirm(`Delete ${selectedRecords.length} selected purchase order(s)? Received or quotation-linked orders cannot be deleted.`)) return;
-    setError("");
-    setMessage("");
+    const ids = new Set(selectedRecords.map((order) => order.id));
+    const invoices = supplierInvoices.filter((invoice) => ids.has(invoice.purchaseOrderId));
+    const quotationIds = new Set(selectedRecords.map((order) => order.quotationId).filter(Boolean));
+    const removedQuotations = quotations.filter((quotation) => quotationIds.has(quotation.id)
+      && !purchaseOrders.some((order) => !ids.has(order.id) && order.quotationId === quotation.id));
+    const discardEdit = ids.has(editingOrderId);
+    const confirmation = `Delete ${selectedRecords.length} purchase order(s)? Received stock will be reversed. This permanently deletes ${invoices.length} linked invoice(s) and their payment history, and ${removedQuotations.length} unshared quotation(s). Shared quotations are kept.${discardEdit ? " Unsaved changes to the selected order will be discarded." : ""}`;
+    if (!window.confirm(confirmation)) return;
+    setActionError("");
+    setActionMessage("");
     try {
       deletePurchaseOrders(selectedRecords.map((order) => order.id));
       setSelectedPOIds([]);
+      setSplittingOrderId(null);
+      if (discardEdit) {
+        setEditingOrderId(null);
+        setForm({ supplierId: "", lineItems: [{ itemId: "", quantity: "", unitCost: "" }], date: "", invoices: [] });
+        setError("");
+        setMessage("");
+      }
+      setActionMessage("Purchase order(s) deleted and linked records updated.");
     } catch (deleteError) {
-      setError(deleteError.message);
+      setActionError(deleteError.message);
     }
   };
 
@@ -966,6 +1061,7 @@ function PurchaseOrdersView() {
     setMessage("");
     try {
       const updated = receivePurchaseOrder(purchaseOrder.id);
+      setSplittingOrderId(null);
       const orderNumber = purchaseOrder.orderNumber || purchaseOrder.id;
       setMessage(updated ? `${orderNumber} received and stock updated.` : `${orderNumber} was already received.`);
     } catch (actionError) {
@@ -978,8 +1074,9 @@ function PurchaseOrdersView() {
       <div className="page-shell page-content">
         <PrintHeader title="Purchase Orders" subtitle="Issued supplier orders and goods receipt log." />
         {canCreate ? (
-          <section className="page-card no-print">
+          <section className="page-card no-print" ref={formRef}>
             <h2 className="panel-title">{editingOrderId ? "Edit purchase order" : "Create purchase order"}</h2>
+            {editingOrderId ? <p className="panel-copy">Saving a received order updates its linked receipts and stock. Changing supplier removes any quotation link and updates linked invoices. Previously shared PO documents may no longer match.</p> : null}
             <form onSubmit={submit} className="po-create-form">
               <label>Supplier
                 <select className="input-field" value={form.supplierId} onChange={(event) => setForm((current) => ({ ...current, supplierId: event.target.value }))} required>
@@ -987,6 +1084,9 @@ function PurchaseOrdersView() {
                   {suppliers.map((supplier) => <option key={supplier.id} value={supplier.id}>{supplier.name}</option>)}
                 </select>
               </label>
+              {editingOrderId ? <label>PO date
+                <input className="input-field" type="date" value={form.date} onChange={(event) => setForm((current) => ({ ...current, date: event.target.value }))} required />
+              </label> : null}
               <div className="po-create-lines">
                 <div className="panel-heading">
                   <h3 className="panel-title">Items on this PO</h3>
@@ -1010,7 +1110,7 @@ function PurchaseOrdersView() {
                         required
                       >
                         <option value="">Select item</option>
-                        {activeItems.map((item) => <option key={item.id} value={item.id}>{item.name} ({item.uom})</option>)}
+                        {items.filter((item) => !item.archived || item.id === line.itemId).map((item) => <option key={item.id} value={item.id}>{item.name}{item.archived ? " (Archived)" : ""} ({item.uom})</option>)}
                       </select>
                     </label>
                     <label>Quantity {index + 1}
@@ -1050,11 +1150,24 @@ function PurchaseOrdersView() {
                   </div>
                 ))}
               </div>
+              {editingOrderId && form.invoices.length ? (
+                <div>
+                  <h3 className="panel-title">Linked invoices</h3>
+                  <p className="panel-copy">Payments are preserved; an invoice total cannot be less than the amount already paid.</p>
+                  {form.invoices.map((invoice, index) => (
+                    <div className="po-create-line" key={invoice.id}>
+                      <label>Invoice number {index + 1}<input className="input-field" value={invoice.number} onChange={(event) => setForm((current) => ({ ...current, invoices: current.invoices.map((entry) => entry.id === invoice.id ? { ...entry, number: event.target.value } : entry) }))} required /></label>
+                      <label>Invoice date {index + 1}<input className="input-field" type="date" value={invoice.date} onChange={(event) => setForm((current) => ({ ...current, invoices: current.invoices.map((entry) => entry.id === invoice.id ? { ...entry, date: event.target.value } : entry) }))} required /></label>
+                      <label>Invoice total {index + 1} (KSh)<input className="input-field" type="number" min="0.01" step="0.01" value={invoice.amount} onChange={(event) => setForm((current) => ({ ...current, invoices: current.invoices.map((entry) => entry.id === invoice.id ? { ...entry, amount: event.target.value } : entry) }))} required /></label>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
               <button className="primary-btn" type="submit">{editingOrderId ? "Save purchase order" : "Create purchase order"}</button>
               {editingOrderId ? (
                 <button className="secondary-btn" type="button" onClick={() => {
                   setEditingOrderId(null);
-                  setForm({ supplierId: "", lineItems: [{ itemId: "", quantity: "", unitCost: "" }] });
+                  setForm({ supplierId: "", lineItems: [{ itemId: "", quantity: "", unitCost: "" }], date: "", invoices: [] });
                 }}>Cancel edit</button>
               ) : null}
             </form>
@@ -1066,18 +1179,18 @@ function PurchaseOrdersView() {
           <div className="panel-heading po-list-heading">
             <div>
               <h2 className="panel-title">Purchase order register</h2>
-              <p className="panel-copy">Select open orders from one supplier to print, download, share, or export them together.</p>
+              <p className="panel-copy">Choose a supplier to view its orders and items. Select open orders to create documents.</p>
             </div>
             <div className="po-selection-controls no-print">
               <label>
-                Supplier for documents
+                Supplier for register
                 <select
                   className="input-field"
                   value={selectedSupplierId}
                   onChange={(event) => changeSupplier(event.target.value)}
-                  aria-label="Supplier for documents"
+                  aria-label="Supplier for register"
                 >
-                  <option value="">Select supplier</option>
+                  <option value="">All suppliers</option>
                   {suppliers.map((supplier) => (
                     <option key={supplier.id} value={supplier.id}>{supplier.name}</option>
                   ))}
@@ -1094,17 +1207,19 @@ function PurchaseOrdersView() {
             </div>
           </div>
           <RecordActions
-            records={purchaseOrders}
-            selectedRecords={selectedOrders}
+            records={displayedOrders}
+            selectedRecords={selectedRecords}
             recordName="purchase-orders"
+            formatRecord={formatOrderForExport}
             onEdit={canCreate ? startEdit : undefined}
             onDelete={canCreate ? deleteSelectedOrders : undefined}
-            canEdit={selectedOrders.length === 1 && !selectedOrders[0]?.quotationId}
-            canDelete={selectedOrders.every((order) => order.status !== "Received" && !order.quotationId)}
+            canEdit={selectedRecords.length === 1}
           />
           <p className="po-selection-hint no-print">
-            Received purchase orders are excluded from document selection. Choose one supplier, then select one or more open orders.
+            Select one PO and use Actions to edit it. Choose a supplier to create documents; the header checkbox selects its open orders only.
           </p>
+          <Feedback error={actionError} message={actionMessage} />
+          {editingOrderId ? <p className="po-selection-hint no-print">An edit is in progress. Select the same PO to return to it, or select another PO to switch after confirmation.</p> : null}
           <table className="data-table">
             <thead>
               <tr>
@@ -1117,19 +1232,20 @@ function PurchaseOrdersView() {
                     disabled={!printableOrdersForSupplier.length}
                   />
                 </th>
-                <th>PO number</th><th>Supplier</th><th>Date</th><th>Items</th><th>Total cost</th><th>Status</th><th className="no-print">Action</th>
+                <th>PO number</th><th>Supplier</th><th>Date</th><th>Items</th><th>Total cost</th><th className="no-print">Status</th><th className="no-print">Action</th>
               </tr>
             </thead>
             <tbody>
-              {purchaseOrders.map((purchaseOrder) => {
+              {displayedOrders.map((purchaseOrder) => {
                 const totalCost = purchaseOrder.lineItems.reduce(
                   (sum, line) => sum + Number(line.quantity) * Number(line.unitCost),
                   0
                 );
                 return (
-                  <tr key={purchaseOrder.id}>
+                  <React.Fragment key={purchaseOrder.id}>
+                  <tr>
                     <td className="no-print">
-                      {purchaseOrder.status !== "Received" && purchaseOrder.supplierId === selectedSupplierId ? (
+                      {!selectedSupplierId || purchaseOrder.supplierId === selectedSupplierId ? (
                         <input
                           type="checkbox"
                           aria-label={`Select ${purchaseOrder.orderNumber || purchaseOrder.id}`}
@@ -1147,16 +1263,56 @@ function PurchaseOrdersView() {
                       return <div key={`${purchaseOrder.id}-${line.itemId}-${index}`}>{line.quantity} {line.uom || item?.uom || ""} × {itemName}</div>;
                     })}</td>
                     <td>{formatKsh(totalCost, true)}</td>
-                    <td>{purchaseOrder.status}</td>
+                    <td className="no-print">{purchaseOrder.status}</td>
                     <td className="no-print">
                       {canReceive && purchaseOrder.status !== "Received"
-                        ? <button className="secondary-btn" type="button" onClick={() => receive(purchaseOrder)}>Receive</button>
+                        ? <button className="secondary-btn" type="button" disabled={Boolean(editingOrderId)} onClick={() => receive(purchaseOrder)}>Receive</button>
                         : "—"}
+                      {canCreate && purchaseOrder.status === "Pending" && purchaseOrder.lineItems.length > 1 ? (
+                        <button className="secondary-btn" type="button" disabled={Boolean(editingOrderId)} title={editingOrderId ? "Finish or cancel editing before splitting an order." : undefined} onClick={() => {
+                          setSplittingOrderId(purchaseOrder.id);
+                          setSelectedLineIndexes([]);
+                          setSplitError("");
+                          setSplitMessage(null);
+                        }}>Select items</button>
+                      ) : null}
                     </td>
                   </tr>
+                  {splittingOrder?.id === purchaseOrder.id ? (
+                    <tr className="no-print"><td colSpan="8">
+                      <section aria-label="Select items for a new purchase order">
+                        <h3 className="panel-title">Select items from {splittingOrder.orderNumber || splittingOrder.id}</h3>
+                        <p className="panel-copy">Selected items move to a new PO for the same supplier. Unselected items remain on the original PO.</p>
+                        {splittingOrder.lineItems.map((line, index) => {
+                          const item = items.find((entry) => entry.id === line.itemId);
+                          return (
+                            <div key={index}>
+                              <label>
+                                <input
+                                  type="checkbox"
+                                  checked={selectedLineIndexes.includes(index)}
+                                  onChange={() => setSelectedLineIndexes((current) => current.includes(index)
+                                    ? current.filter((entry) => entry !== index)
+                                    : [...current, index])}
+                                />
+                                {" "}{item?.name || "Unknown item"} — {line.quantity} {line.uom || item?.uom || ""} at {formatKsh(line.unitCost, true)}
+                              </label>
+                            </div>
+                          );
+                        })}
+                        <button type="button" className="primary-btn" onClick={splitSelectedItems}>Create PO for selected items</button>
+                        <button type="button" className="secondary-btn" onClick={() => { setSplittingOrderId(null); setSplitError(""); }}>Cancel</button>
+                        <Feedback error={splitError} />
+                      </section>
+                    </td></tr>
+                  ) : null}
+                  {splitMessage?.orderId === purchaseOrder.id ? (
+                    <tr className="no-print"><td colSpan="8"><Feedback message={splitMessage.text} /></td></tr>
+                  ) : null}
+                  </React.Fragment>
                 );
               })}
-              {!purchaseOrders.length ? <tr><td colSpan="8">No purchase orders found.</td></tr> : null}
+              {!displayedOrders.length ? <tr><td colSpan="8">{selectedSupplierId ? "No purchase orders found for this supplier." : "No purchase orders found."}</td></tr> : null}
             </tbody>
           </table>
         </section>
@@ -1166,7 +1322,7 @@ function PurchaseOrdersView() {
   );
 }
 
-export default function InventorySubmenu({ section }) {
+export default function InventorySubmenu({ section, user }) {
   const details = sectionDetails[section];
   if (!details) return null;
   if (section === "purchase-orders") return <PurchaseOrdersView />;
@@ -1176,7 +1332,7 @@ export default function InventorySubmenu({ section }) {
     return (
       <div className="page-shell">
         <PrintHeader title={details.title} subtitle={details.subtitle} />
-        <StockMovementView key={section} movementType={movementType} />
+        <StockMovementView key={section} movementType={movementType} user={user} />
       </div>
     );
   }
