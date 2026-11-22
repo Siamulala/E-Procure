@@ -189,6 +189,19 @@ export default function PurchaseRequests() {
           records={purchaseRequests}
           selectedRecords={selectedRequests}
           recordName="purchase-requests"
+          formatPdfRecord={(request) => ({
+            "Request number": request.id, Date: request.date, Requester: request.requestedBy,
+            Department: request.department, Urgency: request.urgency,
+            Items: request.lineItems.map((line) => {
+              const item = items.find((entry) => entry.id === line.itemId);
+              return `${line.quantity} ${line.uom || item?.uom || ""} - ${item?.name || "Unknown item"}`;
+            }).join("\n"),
+            "Estimated total": formatKsh(request.lineItems.reduce((sum, line) => {
+              const item = items.find((entry) => entry.id === line.itemId);
+              return sum + (item ? Number(item.unitCost) * Number(line.quantity) : 0);
+            }, 0), true),
+            Status: request.status,
+          })}
           onEdit={currentRole === "Requester" ? startEdit : undefined}
           onDelete={currentRole === "Requester" ? deleteSelected : undefined}
           onUpload={currentRole === "Requester" ? () => { setMessage(""); setImportOpen(true); } : undefined}

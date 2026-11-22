@@ -135,6 +135,7 @@ export default function Dashboard({ user, suppliers = [], orders = [], inventory
       backgroundColor: "rgba(34, 197, 94, 0.2)",
       borderColor: "#22c55e",
       borderWidth: 2,
+      tension: 0.45,
       fill: true,
     }]
   };

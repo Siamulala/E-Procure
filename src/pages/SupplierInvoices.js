@@ -45,7 +45,7 @@ export default function SupplierInvoices() {
         <h2 className="panel-title">Record invoice</h2>
         <form className="form-row" onSubmit={submit}>
           <label>Supplier<select className="input-field" value={form.supplierId} onChange={(event) => setForm({ ...form, supplierId: event.target.value, purchaseOrderId: "" })} required>
-            <option value="">Select supplier</option>{suppliers.map((supplier) => <option key={supplier.id} value={supplier.id}>{supplier.name}</option>)}
+            <option value="">Select supplier</option>{suppliers.filter((supplier) => !supplier.archived).map((supplier) => <option key={supplier.id} value={supplier.id}>{supplier.name}</option>)}
           </select></label>
           <label>Invoice number<input className="input-field" value={form.number} onChange={(event) => setForm({ ...form, number: event.target.value })} required /></label>
           <label>Invoice date<input className="input-field" type="date" value={form.date} onChange={(event) => setForm({ ...form, date: event.target.value })} required /></label>
@@ -59,7 +59,13 @@ export default function SupplierInvoices() {
       {error || message ? <p role={error ? "alert" : "status"}>{error || message}</p> : null}
       <section className="page-card" style={{ overflowX: "auto" }}>
         <h2 className="panel-title">Supplier invoice register</h2>
-        <RecordActions records={supplierInvoices} selectedRecords={supplierInvoices.filter((invoice) => selectedIds.includes(invoice.id))} recordName="supplier-invoices" />
+        <RecordActions records={supplierInvoices} selectedRecords={supplierInvoices.filter((invoice) => selectedIds.includes(invoice.id))} recordName="supplier-invoices"
+          formatPdfRecord={(invoice) => ({
+            Invoice: invoice.number, Supplier: invoice.supplier, Date: invoice.date,
+            "Purchase order": invoice.purchaseOrderNumber,
+            Total: formatKsh(invoice.amountCents / 100, true), Paid: formatKsh(invoice.paidCents / 100, true),
+            Outstanding: formatKsh((invoice.amountCents - invoice.paidCents) / 100, true),
+          })} />
         <table className="data-table">
           <thead><tr><th className="no-print">Select</th><th>Invoice</th><th>Supplier</th><th>Date</th><th>Purchase order</th><th>Total</th><th>Paid</th><th>Outstanding</th><th className="no-print">Record payment</th></tr></thead>
           <tbody>

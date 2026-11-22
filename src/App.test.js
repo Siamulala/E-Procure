@@ -107,7 +107,7 @@ test.each([
 ])('opens the %s inventory submenu', async (path, title, actionHeading) => {
   localStorage.setItem(
     'user',
-    JSON.stringify({ name: 'Admin', email: 'admin@easyprocure.com', role: 'Admin' })
+    JSON.stringify({ name: 'Admin', email: 'admin@easyprocure.com', role: 'Admin', password: 'admin' })
   );
   window.history.pushState({}, '', path);
 

@@ -4,6 +4,7 @@ import PrintHeader from "../components/PrintHeader";
 import PurchaseOrderBatchModal from "../components/PurchaseOrderBatchModal";
 import RecordActions from "../components/RecordActions";
 import CableConfiguration from "../components/CableConfiguration";
+import CategoryManager from "../components/CategoryManager";
 import { convertItemQuantity, formatStockBalances, useInventory } from "../contexts/InventoryContext";
 import { formatKsh } from "../utils/currency";
 import { canRoleViewMenu } from "../utils/menuAccess";
@@ -43,13 +44,38 @@ function Feedback({ error, message }) {
 }
 
 function SuppliersView() {
-  const { suppliers, addSupplier, updateSupplier, deleteSuppliers } = useInventory();
-  const emptyForm = { name: "", email: "", leadTimeDays: "5", paymentTerms: "Net 30" };
+  const { suppliers, stockMovements, addSupplier, updateSupplier, deleteSuppliers, restoreSupplier } = useInventory();
+  const emptyForm = { name: "", email: "", phone: "", address: "", leadTimeDays: "5", paymentTerms: "Net 30" };
   const [form, setForm] = useState(emptyForm);
+  const [supplierFormOpen, setSupplierFormOpen] = useState(false);
   const [selectedIds, setSelectedIds] = useState([]);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
-  const selectedSuppliers = suppliers.filter((supplier) => selectedIds.includes(supplier.id));
+  const activeSuppliers = suppliers.filter((supplier) => !supplier.archived);
+  const archivedSuppliers = suppliers.filter((supplier) => supplier.archived);
+  const selectedSuppliers = activeSuppliers.filter((supplier) => selectedIds.includes(supplier.id));
+  const supplierSpend = stockMovements.reduce((totals, movement) => {
+    if (movement.movementType !== "in" || !movement.isPurchase) return totals;
+    const supplier = suppliers.find((entry) => entry.id === movement.supplierId)
+      || (!movement.supplierId ? suppliers.find((entry) => entry.name === movement.supplier) : null);
+    const amount = Number(movement.quantity) * Number(movement.unitCost);
+    if (!supplier || !Number.isFinite(amount)) return totals;
+    totals.set(supplier.id, (totals.get(supplier.id) || 0) + amount);
+    return totals;
+  }, new Map());
+
+  const openNewSupplier = () => {
+    setForm(emptyForm);
+    setError("");
+    setMessage("");
+    setSupplierFormOpen(true);
+  };
+
+  const closeSupplierForm = () => {
+    setForm(emptyForm);
+    setError("");
+    setSupplierFormOpen(false);
+  };
 
   const submit = (event) => {
     event.preventDefault();
@@ -71,30 +97,46 @@ function SuppliersView() {
   };
 
   const startEdit = (supplier) => {
-    setForm({ ...supplier, leadTimeDays: supplier.leadTimeDays == null ? "" : String(supplier.leadTimeDays) });
+    setForm({ ...supplier, email: supplier.email || "", phone: supplier.phone || "", address: supplier.address || "", leadTimeDays: supplier.leadTimeDays == null ? "" : String(supplier.leadTimeDays) });
     setError("");
     setMessage("");
+    setSupplierFormOpen(true);
   };
 
   const removeSelected = (records) => {
-    if (!window.confirm(`Delete ${records.length} selected supplier(s)? Suppliers used in procurement or stock history cannot be deleted.`)) return;
+    if (!window.confirm(`Remove ${records.length} selected supplier(s) from the active list? Purchase orders, invoices, payments and stock history will be kept.`)) return;
     setError("");
     setMessage("");
     try {
       deleteSuppliers(records.map((supplier) => supplier.id));
+      if (records.some((supplier) => supplier.id === form.id)) closeSupplierForm();
       setSelectedIds([]);
+      setMessage("Selected suppliers removed from the active list. History has been kept.");
     } catch (deleteError) {
       setError(deleteError.message);
     }
   };
 
+  const restore = (supplier) => {
+    setError("");
+    setMessage("");
+    try {
+      restoreSupplier(supplier.id);
+      setMessage(`${supplier.name} restored to the active list.`);
+    } catch (restoreError) {
+      setError(restoreError.message);
+    }
+  };
+
   return (
     <>
-      <section className="page-card no-print">
+      {supplierFormOpen ? <section className="page-card no-print">
         <h2 className="panel-title">{form.id ? "Edit supplier" : "Add supplier"}</h2>
         <form onSubmit={submit} className="form-row" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))" }}>
           <label>Supplier name<input className="input-field" value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} required /></label>
-          <label>Email<input className="input-field" type="email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} required /></label>
+          <label>Email (optional)<input className="input-field" type="email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} /></label>
+          <label>Phone number (optional)<input className="input-field" type="tel" value={form.phone} onChange={(event) => setForm({ ...form, phone: event.target.value })} /></label>
+          <label>Address (optional)<input className="input-field" value={form.address} onChange={(event) => setForm({ ...form, address: event.target.value })} /></label>
           <label>Lead time (days)<input className="input-field" type="number" min="0" step="1" value={form.leadTimeDays} onChange={(event) => setForm({ ...form, leadTimeDays: event.target.value })} /></label>
           <label>Payment terms
             <select className="input-field" value={form.paymentTerms} onChange={(event) => setForm({ ...form, paymentTerms: event.target.value })}>
@@ -106,22 +148,30 @@ function SuppliersView() {
             </select>
           </label>
           <button className="primary-btn" type="submit">{form.id ? "Save supplier changes" : "Add supplier"}</button>
-          {form.id ? <button className="secondary-btn" type="button" onClick={() => setForm(emptyForm)}>Cancel edit</button> : null}
+          <button className="secondary-btn" type="button" onClick={closeSupplierForm}>{form.id ? "Cancel edit" : "Close supplier form"}</button>
         </form>
-        <Feedback error={error} message={message} />
-      </section>
+      </section> : null}
+      <Feedback error={error} message={message} />
 
       <section className="page-card" style={{ overflowX: "auto" }}>
         <div className="panel-heading">
           <div>
             <h2 className="panel-title">Supplier list</h2>
-            <p className="panel-copy">Select suppliers to edit, delete, print, export, or download.</p>
+            <p className="panel-copy">Amount spent totals recorded purchased Stock In, excluding pending orders. Select suppliers to edit, delete, print, export, or download.</p>
           </div>
         </div>
         <RecordActions
-          records={suppliers}
+          records={activeSuppliers}
           selectedRecords={selectedSuppliers}
           recordName="suppliers"
+          onAdd={openNewSupplier}
+          addLabel="Add supplier"
+          formatPdfRecord={(supplier) => ({
+            Supplier: supplier.name, Email: supplier.email, Phone: supplier.phone, Address: supplier.address,
+            "Lead time": supplier.leadTimeDays == null ? "" : `${supplier.leadTimeDays} days`,
+            "Payment terms": supplier.paymentTerms,
+            "Amount spent": formatKsh(supplierSpend.get(supplier.id) || 0, true),
+          })}
           onEdit={startEdit}
           onDelete={removeSelected}
         />
@@ -132,20 +182,20 @@ function SuppliersView() {
                 <input
                   type="checkbox"
                   aria-label="Select all suppliers"
-                  checked={suppliers.length > 0 && suppliers.every((supplier) => selectedIds.includes(supplier.id))}
+                  checked={activeSuppliers.length > 0 && activeSuppliers.every((supplier) => selectedIds.includes(supplier.id))}
                   onChange={() => setSelectedIds(
-                    suppliers.length > 0 && suppliers.every((supplier) => selectedIds.includes(supplier.id))
+                    activeSuppliers.length > 0 && activeSuppliers.every((supplier) => selectedIds.includes(supplier.id))
                       ? []
-                      : suppliers.map((supplier) => supplier.id)
+                      : activeSuppliers.map((supplier) => supplier.id)
                   )}
-                  disabled={!suppliers.length}
+                  disabled={!activeSuppliers.length}
                 />
               </th>
-              <th>Supplier</th><th>Email</th><th>Lead time</th><th>Payment terms</th>
+              <th>Supplier</th><th>Email</th><th>Phone number</th><th>Address</th><th>Lead time</th><th>Payment terms</th><th>Amount spent</th>
             </tr>
           </thead>
           <tbody>
-            {suppliers.map((supplier) => (
+            {activeSuppliers.map((supplier) => (
               <tr key={supplier.id}>
                 <td className="no-print">
                   <input
@@ -157,14 +207,26 @@ function SuppliersView() {
                       : [...current, supplier.id])}
                   />
                 </td>
-                <td>{supplier.name}</td><td>{supplier.email || "—"}</td>
+                <td>{supplier.name}</td><td>{supplier.email || "—"}</td><td>{supplier.phone || "—"}</td><td>{supplier.address || "—"}</td>
                 <td>{supplier.leadTimeDays == null ? "—" : `${Number(supplier.leadTimeDays)} days`}</td><td>{supplier.paymentTerms || "—"}</td>
+                <td>{formatKsh(supplierSpend.get(supplier.id) || 0, true)}</td>
               </tr>
             ))}
-            {!suppliers.length ? <tr><td colSpan="5">No suppliers found.</td></tr> : null}
+            {!activeSuppliers.length ? <tr><td colSpan="8">No suppliers found.</td></tr> : null}
           </tbody>
         </table>
       </section>
+      {archivedSuppliers.length ? <section className="page-card" style={{ overflowX: "auto" }}>
+        <h2 className="panel-title">Removed suppliers</h2>
+        <p className="panel-copy">Removed suppliers are unavailable for new transactions; their history is retained.</p>
+        <table className="data-table">
+          <thead><tr><th>Supplier</th><th>Email</th><th>Phone number</th><th>Address</th><th className="no-print">Actions</th></tr></thead>
+          <tbody>{archivedSuppliers.map((supplier) => (
+            <tr key={supplier.id}><td>{supplier.name}</td><td>{supplier.email || "—"}</td><td>{supplier.phone || "—"}</td><td>{supplier.address || "—"}</td>
+              <td className="no-print"><button className="secondary-btn" type="button" onClick={() => restore(supplier)} aria-label={`Restore ${supplier.name}`}>Restore</button></td></tr>
+          ))}</tbody>
+        </table>
+      </section> : null}
     </>
   );
 }
@@ -172,6 +234,7 @@ function SuppliersView() {
 function ItemsView() {
   const {
     items,
+    inventoryCategories,
     addItem,
     updateItem,
     deleteItem,
@@ -424,7 +487,9 @@ function ItemsView() {
         <form onSubmit={submit} className="form-row" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))" }}>
           <label>SKU<input className="input-field" value={form.sku} onChange={(event) => setForm({ ...form, sku: event.target.value })} required /></label>
           <label>Item name<input className="input-field" value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} required /></label>
-          <label>Category<input className="input-field" value={form.category} onChange={(event) => setForm({ ...form, category: event.target.value })} placeholder="General Materials" /></label>
+          <label>Category<select className="input-field" value={form.category} onChange={(event) => setForm({ ...form, category: event.target.value })}>
+            <option value="">General Materials (default)</option>{inventoryCategories.map((category) => <option key={category} value={category}>{category}</option>)}
+          </select></label>
           <label>Stock unit of measure<input className="input-field" value={form.uom} onChange={(event) => setForm({ ...form, uom: event.target.value })} placeholder="piece, km, m, reel, roll" list="inventory-uom-options" required /></label>
           <label>Unit cost (KSh)<input className="input-field" type="number" min="0" step="0.01" value={form.unitCost} onChange={(event) => setForm({ ...form, unitCost: event.target.value })} required /></label>
           <label>Stock quantity<input className="input-field" type="number" min="0" step="0.001" value={form.stock} onChange={(event) => setForm({ ...form, stock: event.target.value })} required /></label>
@@ -435,8 +500,19 @@ function ItemsView() {
         <datalist id="inventory-uom-options">
           {["km", "m", "reel", "roll", "piece", "pair", "packet"].map((unit) => <option key={unit} value={unit} />)}
         </datalist>
+        <datalist id="inventory-category-options">
+          {inventoryCategories.map((category) => <option key={category} value={category} />)}
+        </datalist>
         <p className="panel-copy">Stock quantity, reorder level, and unit cost use the selected stock unit. Metres and kilometres convert when recording stock movements.</p>
         <Feedback error={error} message={message} />
+      </section>
+
+      <section className="page-card no-print">
+        <h2 className="panel-title">Manage inventory categories</h2>
+        <CategoryManager onCategoryChange={(oldName, name) => {
+          if (form.category.trim().toLowerCase() === oldName.toLowerCase()) setForm((current) => ({ ...current, category: name }));
+          if (transactionForm.category.trim().toLowerCase() === oldName.toLowerCase()) setTransactionForm((current) => ({ ...current, category: name }));
+        }} />
       </section>
 
       <section className="page-card no-print">
@@ -454,7 +530,7 @@ function ItemsView() {
           <label>Unit of measure<input className="input-field" value={transactionForm.uom} onChange={(event) => setTransactionForm({ ...transactionForm, uom: event.target.value })} required /></label>
           <label>Unit cost (KSh)<input className="input-field" type="number" min="0" step="0.01" value={transactionForm.amount} onChange={(event) => setTransactionForm({ ...transactionForm, amount: event.target.value })} required /></label>
           <label>Supplier<input className="input-field" value={transactionForm.supplier} onChange={(event) => setTransactionForm({ ...transactionForm, supplier: event.target.value })} required /></label>
-          <label>Material category<input className="input-field" value={transactionForm.category} onChange={(event) => setTransactionForm({ ...transactionForm, category: event.target.value })} /></label>
+          <label>Material category<input className="input-field" value={transactionForm.category} onChange={(event) => setTransactionForm({ ...transactionForm, category: event.target.value })} list="inventory-category-options" /></label>
           <label>Receipt (PDF, PNG, JPEG; max 10 MB)
             <input
               ref={receiptInputRef}
@@ -515,6 +591,11 @@ function ItemsView() {
           records={activeItems}
           selectedRecords={selectedItems}
           recordName="inventory-items"
+          formatPdfRecord={(item) => ({
+            SKU: item.sku, Item: item.name, Category: item.category || "General Materials",
+            "Unit cost": formatKsh(item.unitCost, true), Stock: formatStockBalances(item),
+            "Reorder level": `${item.reorderLevel} ${item.uom}`,
+          })}
           onEdit={startEdit}
           onDelete={removeItems}
         />
@@ -598,6 +679,12 @@ function ItemsView() {
           records={annualPurchases}
           selectedRecords={selectedTransactions}
           recordName={`purchases-${purchaseYear}`}
+          formatPdfRecord={(transaction) => ({
+            Date: transaction.date, Item: transaction.item, Supplier: transaction.supplier,
+            Category: transaction.category || "General Materials", Quantity: `${transaction.quantity} ${transaction.uom}`,
+            "Unit cost": formatKsh(transaction.amount, true), Total: formatKsh(transaction.total, true),
+            Reference: transaction.reference,
+          })}
         />
         <table className="data-table">
           <thead>
@@ -664,7 +751,7 @@ function ItemsView() {
 }
 
 function StockMovementView({ movementType, user }) {
-  const { items, suppliers, stockMovements, roleMenuPermissions, recordStockMovement, updateStockMovement, deleteStockMovements } = useInventory();
+  const { items, suppliers, stockMovements, roleMenuPermissions, inventoryCategories, recordStockMovement, updateStockMovement, deleteStockMovements } = useInventory();
   const activeItems = items.filter((item) => !item.archived);
   const [selectedIds, setSelectedIds] = useState([]);
   const [editingMovementId, setEditingMovementId] = useState(null);
@@ -678,6 +765,7 @@ function StockMovementView({ movementType, user }) {
     isPurchase: false,
     supplierId: "",
     unitCost: "",
+    category: "",
   });
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
@@ -725,6 +813,7 @@ function StockMovementView({ movementType, user }) {
       isPurchase: Boolean(movement.isPurchase),
       supplierId: movement.supplierId || "",
       unitCost: movement.unitCost == null ? "" : String(movement.unitCost),
+      category: movement.category || items.find((item) => item.id === movement.itemId)?.category || "General Materials",
     });
     setError("");
     setMessage("");
@@ -751,7 +840,7 @@ function StockMovementView({ movementType, user }) {
           <label>Item
             <select className="input-field" value={form.itemId} onChange={(event) => {
               const item = activeItems.find((entry) => entry.id === event.target.value);
-              setForm({ ...form, itemId: event.target.value, uom: item?.uom || "" });
+              setForm({ ...form, itemId: event.target.value, uom: item?.uom || "", category: item?.category || "General Materials" });
             }} required disabled={Boolean(editingMovementId)}>
               <option value="">Select item</option>
               {items.filter((item) => !item.archived || item.id === form.itemId).map((item) => (
@@ -769,10 +858,13 @@ function StockMovementView({ movementType, user }) {
           <label>Reference<input className="input-field" value={form.reference} onChange={(event) => setForm({ ...form, reference: event.target.value })} placeholder="Receipt or issue number" /></label>
           <label>Notes<input className="input-field" value={form.notes} onChange={(event) => setForm({ ...form, notes: event.target.value })} /></label>
           {movementType === "in" ? <>
+            <label>Category<select className="input-field" value={form.category} onChange={(event) => setForm({ ...form, category: event.target.value })} required disabled={!selectedItem}>
+              <option value="">Select category</option>{inventoryCategories.map((name) => <option key={name} value={name}>{name}</option>)}
+            </select></label>
             <label><input type="checkbox" checked={form.isPurchase} onChange={(event) => setForm({ ...form, isPurchase: event.target.checked })} /> Purchased stock</label>
             {form.isPurchase ? <>
               <label>Purchase supplier<select className="input-field" value={form.supplierId} onChange={(event) => setForm({ ...form, supplierId: event.target.value })} required>
-                <option value="">Select supplier</option>{suppliers.map((supplier) => <option key={supplier.id} value={supplier.id}>{supplier.name}</option>)}
+                <option value="">Select supplier</option>{suppliers.filter((supplier) => !supplier.archived || (editingMovementId && supplier.id === stockMovements.find((movement) => movement.id === editingMovementId)?.supplierId)).map((supplier) => <option key={supplier.id} value={supplier.id}>{supplier.name}{supplier.archived ? " (Removed)" : ""}</option>)}
               </select></label>
               <label>Rate (KSh per selected UOM)<input className="input-field" type="number" min="0" step="0.01" value={form.unitCost} onChange={(event) => setForm({ ...form, unitCost: event.target.value })} required /></label>
             </> : null}
@@ -788,6 +880,12 @@ function StockMovementView({ movementType, user }) {
         {selectedItem ? <p className="panel-copy">Current balance: {formatStockBalances(selectedItem)}</p> : null}
         <Feedback error={error} message={message} />
       </section>
+      {movementType === "in" && canManageStock ? <section className="page-card no-print">
+        <h2 className="panel-title">Manage categories</h2>
+        <CategoryManager onCategoryChange={(oldName, name) => {
+          if (form.category.trim().toLowerCase() === oldName.toLowerCase()) setForm((current) => ({ ...current, category: name }));
+        }} />
+      </section> : null}
 
       <section className="page-card" style={{ overflowX: "auto" }}>
         <div className="panel-heading">
@@ -800,6 +898,11 @@ function StockMovementView({ movementType, user }) {
           records={movements}
           selectedRecords={selectedMovements}
           recordName={`${movementType === "in" ? "stock-in" : "stock-out"}-movements`}
+          formatPdfRecord={(movement) => ({
+            Date: movement.date, SKU: movement.sku, Item: movement.item,
+            ...(movementType === "in" ? { Category: movement.category || items.find((item) => item.id === movement.itemId)?.category || "General Materials" } : {}),
+            Quantity: `${movement.quantity} ${movement.uom}`, Reference: movement.reference, Notes: movement.notes,
+          })}
           onEdit={startEdit}
           onDelete={deleteSelected}
           onConfigureCable={canManageStock ? () => setCableSettingsOpen(true) : undefined}
@@ -821,7 +924,7 @@ function StockMovementView({ movementType, user }) {
                   disabled={!selectableMovements.length}
                 />
               </th>
-              <th>Date</th><th>SKU</th><th>Item</th><th>Quantity</th><th>Reference</th><th>Notes</th>
+              <th>Date</th><th>SKU</th><th>Item</th>{movementType === "in" ? <th>Category</th> : null}<th>Quantity</th><th>Reference</th><th>Notes</th>
             </tr>
           </thead>
           <tbody>
@@ -840,10 +943,11 @@ function StockMovementView({ movementType, user }) {
                   )}
                 </td>
                 <td>{movement.date}</td><td>{movement.sku}</td><td>{movement.item}</td>
+                {movementType === "in" ? <td>{movement.category || items.find((item) => item.id === movement.itemId)?.category || "General Materials"}</td> : null}
                 <td>{movement.quantity} {movement.uom}</td><td>{movement.reference || "—"}</td><td>{movement.notes || "—"}</td>
               </tr>
             ))}
-            {!movements.length ? <tr><td colSpan="7">No {title.toLowerCase()} records yet.</td></tr> : null}
+            {!movements.length ? <tr><td colSpan={movementType === "in" ? 8 : 7}>No {title.toLowerCase()} records yet.</td></tr> : null}
           </tbody>
         </table>
       </section>
@@ -898,6 +1002,7 @@ function PurchaseOrdersView() {
   const selectedRecords = displayedOrders.filter((order) => selectedPOIds.includes(order.id));
   const selectedOrders = printableOrdersForSupplier.filter((order) => selectedPOIds.includes(order.id));
   const splittingOrder = purchaseOrders.find((order) => order.id === splittingOrderId);
+  const formSupplier = suppliers.find((supplier) => supplier.id === form.supplierId);
   const formatOrderForExport = (order) => {
     const formatted = { ...order };
     delete formatted.status;
@@ -1041,7 +1146,7 @@ function PurchaseOrdersView() {
     setActionError("");
     setActionMessage("");
     try {
-      deletePurchaseOrders(selectedRecords.map((order) => order.id));
+      deletePurchaseOrders([...ids]);
       setSelectedPOIds([]);
       setSplittingOrderId(null);
       if (discardEdit) {
@@ -1081,9 +1186,19 @@ function PurchaseOrdersView() {
               <label>Supplier
                 <select className="input-field" value={form.supplierId} onChange={(event) => setForm((current) => ({ ...current, supplierId: event.target.value }))} required>
                   <option value="">Select supplier</option>
-                  {suppliers.map((supplier) => <option key={supplier.id} value={supplier.id}>{supplier.name}</option>)}
+                  {suppliers.filter((supplier) => !supplier.archived || (editingOrderId && supplier.id === purchaseOrders.find((order) => order.id === editingOrderId)?.supplierId)).map((supplier) => <option key={supplier.id} value={supplier.id}>{supplier.name}{supplier.archived ? " (Removed)" : ""}</option>)}
                 </select>
               </label>
+              {formSupplier ? <div className="po-supplier-details" aria-label="Selected supplier details">
+                  <strong>Supplier details</strong>
+                  <dl>
+                    <div><dt>Email</dt><dd>{formSupplier.email || "—"}</dd></div>
+                    <div><dt>Phone</dt><dd>{formSupplier.phone || "—"}</dd></div>
+                    <div><dt>Address</dt><dd>{formSupplier.address || "—"}</dd></div>
+                    <div><dt>Payment terms</dt><dd>{formSupplier.paymentTerms || "—"}</dd></div>
+                    <div><dt>Lead time</dt><dd>{formSupplier.leadTimeDays == null ? "—" : `${formSupplier.leadTimeDays} days`}</dd></div>
+                  </dl>
+                </div> : null}
               {editingOrderId ? <label>PO date
                 <input className="input-field" type="date" value={form.date} onChange={(event) => setForm((current) => ({ ...current, date: event.target.value }))} required />
               </label> : null}
@@ -1192,7 +1307,7 @@ function PurchaseOrdersView() {
                 >
                   <option value="">All suppliers</option>
                   {suppliers.map((supplier) => (
-                    <option key={supplier.id} value={supplier.id}>{supplier.name}</option>
+                    <option key={supplier.id} value={supplier.id}>{supplier.name}{supplier.archived ? " (Removed)" : ""}</option>
                   ))}
                 </select>
               </label>
@@ -1211,6 +1326,16 @@ function PurchaseOrdersView() {
             selectedRecords={selectedRecords}
             recordName="purchase-orders"
             formatRecord={formatOrderForExport}
+            formatPdfRecord={(order) => ({
+              "PO number": order.orderNumber || order.id,
+              Supplier: suppliers.find((supplier) => supplier.id === order.supplierId)?.name || "Unknown supplier",
+              Date: order.date,
+              Items: order.lineItems.map((line) => {
+                const item = items.find((entry) => entry.id === line.itemId);
+                return `${line.quantity} ${line.uom || item?.uom || ""} - ${item?.name || "Unknown item"} @ ${formatKsh(line.unitCost, true)}`;
+              }).join("\n"),
+              Total: formatKsh(order.lineItems.reduce((sum, line) => sum + Number(line.quantity) * Number(line.unitCost), 0), true),
+            })}
             onEdit={canCreate ? startEdit : undefined}
             onDelete={canCreate ? deleteSelectedOrders : undefined}
             canEdit={selectedRecords.length === 1}

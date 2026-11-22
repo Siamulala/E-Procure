@@ -72,7 +72,72 @@ code {
   }
 
   .print-header {
-    margin-bottom: 12px;
+    display: block !important;
+    margin-bottom: 8mm !important;
+    text-align: center;
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  .print-header > div {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    width: 100%;
+  }
+
+  .print-header .print-company-logo {
+    width: 170px;
+    margin: 0 auto 5px;
+  }
+
+  .print-company-details {
+    display: block !important;
+    margin: 0 0 6px;
+    color: #334155;
+    font-size: 10px;
+    line-height: 1.4;
+  }
+
+  .print-company-details > * {
+    display: block;
+  }
+
+  .print-header .page-title,
+  .print-header .page-subtitle,
+  .print-header-date {
+    text-align: center;
+  }
+
+  .print-header .page-title {
+    font-size: 20px;
+  }
+
+  .print-header .page-subtitle {
+    margin-top: 3px;
+  }
+
+  .print-watermark {
+    display: block !important;
+    position: fixed;
+    z-index: 0;
+    top: 50%;
+    left: 50%;
+    color: rgba(15, 23, 42, 0.07);
+    font-size: 64px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    white-space: nowrap;
+    pointer-events: none;
+    transform: translate(-50%, -50%) rotate(-35deg);
+  }
+
+  .print-only {
+    display: table-cell !important;
+  }
+
+  .print-only-row {
+    display: table-row !important;
   }
 
   .dashboard-print-logo {
@@ -98,6 +163,10 @@ code {
 
   thead {
     display: table-header-group;
+  }
+
+  body.print-selected-records .print-selected-table tbody tr:not(.print-selected-row) {
+    display: none !important;
   }
 
   tr {

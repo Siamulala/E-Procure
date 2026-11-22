@@ -30,6 +30,9 @@ function getExportRows(orders, suppliers, items, includeVat) {
       return {
         "PO Number": order.orderNumber || order.id,
         Supplier: supplier?.name || "Unknown supplier",
+        "Supplier Email": supplier?.email || "",
+        "Supplier Phone": supplier?.phone || "",
+        "Supplier Address": supplier?.address || "",
         Date: order.date,
         SKU: item?.sku || "N/A",
         Item: item?.name || "Unknown item",
@@ -98,12 +101,31 @@ export default function PurchaseOrderBatchModal({ orders, onClose }) {
         pdf.text("SUPPLIER", 16, y);
         pdf.text("ORDER DETAILS", 110, y);
         pdf.setFont("helvetica", "normal");
-        pdf.text(supplier?.name || "Unknown supplier", 16, y + 7);
-        pdf.text(supplier?.email || "", 16, y + 13);
         pdf.text(`Issue date: ${order.date || "—"}`, 110, y + 7);
         if (order.quotationId) pdf.text(`Quotation ref: ${order.quotationId}`, 110, y + 13);
 
-        y += 34;
+        let supplierY = y + 7;
+        [
+          supplier?.name || "Unknown supplier",
+          supplier?.email && `Email: ${supplier.email}`,
+          supplier?.phone && `Phone: ${supplier.phone}`,
+          supplier?.address && `Address: ${supplier.address}`,
+          supplier?.paymentTerms && `Payment terms: ${supplier.paymentTerms}`,
+        ].filter(Boolean).forEach((value) => {
+          pdf.splitTextToSize(value, 85).forEach((line) => {
+            if (supplierY > 250) {
+              pdf.addPage();
+              supplierY = 20;
+            }
+            pdf.text(line, 16, supplierY);
+            supplierY += 6;
+          });
+        });
+        y = Math.max(supplierY + 10, y + 34);
+        if (y > 245) {
+          pdf.addPage();
+          y = 20;
+        }
         const columns = [16, 28, 54, 118, 142, 166];
         pdf.setFillColor(30, 41, 59);
         pdf.rect(16, y - 5, 178, 9, "F");
@@ -138,6 +160,10 @@ export default function PurchaseOrderBatchModal({ orders, onClose }) {
         });
 
         y = Math.max(y + 8, 205);
+        if (y > 250) {
+          pdf.addPage();
+          y = 205;
+        }
         pdf.setFontSize(10);
         pdf.text(`Subtotal: ${formatKsh(totals.subtotal, true)}`, 194, y, { align: "right" });
         if (includeVat) {
@@ -283,7 +309,13 @@ export default function PurchaseOrderBatchModal({ orders, onClose }) {
                   </div>
                 </header>
                 <div className="po-print-meta">
-                  <div><span>Supplier</span><strong>{supplier?.name || "Unknown supplier"}</strong><small>{supplier?.email || ""}</small></div>
+                  <div>
+                    <span>Supplier</span><strong>{supplier?.name || "Unknown supplier"}</strong>
+                    {supplier?.email ? <small>Email: {supplier.email}</small> : null}
+                    {supplier?.phone ? <small>Phone: {supplier.phone}</small> : null}
+                    {supplier?.address ? <small>Address: {supplier.address}</small> : null}
+                    {supplier?.paymentTerms ? <small>Payment terms: {supplier.paymentTerms}</small> : null}
+                  </div>
                   <div><span>Delivery location</span><strong>Central Warehouse &amp; NOC Store</strong><small>{supplier?.leadTimeDays ?? "—"} business-day lead time</small></div>
                   {order.quotationId ? <div><span>Quotation reference</span><strong>{order.quotationId}</strong></div> : null}
                 </div>

@@ -24,6 +24,33 @@
   font-size: 13px;
 }
 
+.po-supplier-details {
+  grid-column: 1 / -1;
+  padding: 14px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: #f8fafc;
+  color: #1e293b;
+}
+
+.po-supplier-details dl {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 24px;
+  margin: 10px 0 0;
+}
+
+.po-supplier-details dt {
+  color: #475569;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.po-supplier-details dd {
+  margin: 3px 0 0;
+  overflow-wrap: anywhere;
+}
+
 .po-batch-backdrop {
   z-index: 1200;
 }
@@ -166,6 +193,9 @@
 .po-print-meta div {
   display: grid;
   gap: 5px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  white-space: pre-line;
 }
 
 .po-print-meta span {

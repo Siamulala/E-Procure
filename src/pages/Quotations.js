@@ -28,9 +28,10 @@ export default function Quotations() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const activeItems = items.filter((item) => !item.archived);
+  const activeSuppliers = suppliers.filter((supplier) => !supplier.archived);
   const preselectedPrId = searchParams.get("prId") || "";
   const [selectedPrId, setSelectedPrId] = useState(preselectedPrId);
-  const [supplierId, setSupplierId] = useState(suppliers[0]?.id || "");
+  const [supplierId, setSupplierId] = useState(activeSuppliers[0]?.id || "");
   const [validUntil, setValidUntil] = useState(getDefaultValidUntil);
   const [lineItems, setLineItems] = useState(() => ([
     { itemId: activeItems[0]?.id || "", quantity: "1", quotedUnitCost: String(activeItems[0]?.unitCost || "") },
@@ -41,6 +42,7 @@ export default function Quotations() {
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const selectedQuotations = quotations.filter((quotation) => selectedQuotationIds.includes(quotation.id));
+  const editingSupplierId = quotations.find((quotation) => quotation.id === editingQuotationId)?.supplierId;
 
   useEffect(() => {
     setSelectedPrId(preselectedPrId);
@@ -173,7 +175,7 @@ export default function Quotations() {
               <label>Supplier
                 <select className="input-field" value={supplierId} onChange={(event) => setSupplierId(event.target.value)} required>
                   <option value="">Select supplier</option>
-                  {suppliers.map((supplier) => <option key={supplier.id} value={supplier.id}>{supplier.name}</option>)}
+                  {suppliers.filter((supplier) => !supplier.archived || supplier.id === editingSupplierId).map((supplier) => <option key={supplier.id} value={supplier.id}>{supplier.name}{supplier.archived ? " (Removed)" : ""}</option>)}
                 </select>
               </label>
               <label>Valid until<input className="input-field" type="date" value={validUntil} onChange={(event) => setValidUntil(event.target.value)} required /></label>
@@ -199,14 +201,14 @@ export default function Quotations() {
                 </div>
               ))}
             </div>
-            <button type="submit" className="primary-btn" disabled={(!selectedPrId && !activeItems.length) || !suppliers.length} style={{ marginTop: 12 }}>
+            <button type="submit" className="primary-btn" disabled={(!selectedPrId && !activeItems.length) || (!activeSuppliers.length && !editingSupplierId)} style={{ marginTop: 12 }}>
               {editingQuotationId ? "Save quotation changes" : "Save quotation"}
             </button>
             {editingQuotationId ? (
               <button type="button" className="secondary-btn" onClick={() => {
                 setEditingQuotationId(null);
                 setSelectedPrId("");
-                setSupplierId(suppliers[0]?.id || "");
+                setSupplierId(activeSuppliers[0]?.id || "");
                 setValidUntil(getDefaultValidUntil());
                 setLineItems([{ itemId: activeItems[0]?.id || "", quantity: "1", quotedUnitCost: String(activeItems[0]?.unitCost || "") }]);
               }}>Cancel edit</button>
@@ -230,6 +232,17 @@ export default function Quotations() {
           records={quotations}
           selectedRecords={selectedQuotations}
           recordName="quotations"
+          formatPdfRecord={(quotation) => ({
+            "Quote number": quotation.id, "Valid until": quotation.validUntil,
+            "Linked request": quotation.prId || "Direct",
+            Supplier: suppliers.find((entry) => entry.id === quotation.supplierId)?.name || "Unknown supplier",
+            Items: quotation.lineItems.map((line) => {
+              const item = items.find((entry) => entry.id === line.itemId);
+              return `${line.quantity} ${line.uom || item?.uom || ""} - ${item?.name || "Unknown item"} @ ${formatKsh(line.quotedUnitCost, true)}`;
+            }).join("\n"),
+            "Total bid": formatKsh(quotation.lineItems.reduce((sum, line) => sum + Number(line.quantity) * Number(line.quotedUnitCost), 0), true),
+            Status: quotation.status,
+          })}
           onEdit={canCreateOrSelect ? startEdit : undefined}
           onDelete={canCreateOrSelect ? deleteSelected : undefined}
           canEdit={selectedQuotations.length === 1 && selectedQuotations[0].status === "Submitted"}

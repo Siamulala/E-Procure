@@ -11,6 +11,11 @@ import Reporting from "../pages/Reporting";
 import SupplierInvoices from "../pages/SupplierInvoices";
 import { InventoryProvider, normalizeUomName, useInventory } from "./InventoryContext";
 
+function receiptCheckbox(reference) {
+  const movement = JSON.parse(localStorage.getItem("inventory-stock-movements")).find((entry) => entry.reference === reference);
+  return screen.getByLabelText(`Select stock in ${movement.id}`);
+}
+
 function InventoryStateProbe() {
   const { items, purchaseOrders, stockMovements, receivePurchaseOrder } = useInventory();
   const cable = items.find((item) => item.id === "ITM-1");
@@ -804,8 +809,8 @@ test("purchased stock-in feeds the annual inventory and dashboard, but other rec
   rerender(<MemoryRouter><InventoryProvider><InventoryStock /><InventoryDashboard /></InventoryProvider></MemoryRouter>);
   const register = screen.getByRole("heading", { name: "Inventory report" }).closest("section");
   expect(screen.queryByRole("heading", { name: "Current stock" })).not.toBeInTheDocument();
-  expect(within(register).getByText("BUY-1")).toBeInTheDocument();
-  expect(within(register).getByText("RETURN-1")).toBeInTheDocument();
+  expect(receiptCheckbox("BUY-1")).toBeInTheDocument();
+  expect(receiptCheckbox("RETURN-1")).toBeInTheDocument();
   expect(within(register).getAllByText(/250/).length).toBeGreaterThan(0);
   expect(screen.getByLabelText("Item")).toHaveValue("ITM-1");
   expect(screen.getByText(/Annual expenditure/).closest("section")).toHaveTextContent("KSh 250.00");
@@ -824,19 +829,23 @@ test("inventory report edits and deletes Stock In while updating stock and purch
     fireEvent.click(screen.getByRole("button", { name: "Record stock in" }));
 
     rerender(<MemoryRouter><InventoryProvider><InventoryStock /><InventoryDashboard /></InventoryProvider></MemoryRouter>);
-    fireEvent.click(screen.getByLabelText("Select stock in EDIT-1"));
+    fireEvent.click(receiptCheckbox("EDIT-1"));
     fireEvent.click(screen.getByRole("button", { name: "Actions" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Edit" }));
     const editor = screen.getByRole("heading", { name: "Edit Stock In record" }).closest("section");
+    expect(within(editor).queryByLabelText("Reference")).not.toBeInTheDocument();
     fireEvent.change(within(editor).getByLabelText("Quantity"), { target: { value: "500" } });
     fireEvent.change(within(editor).getByLabelText("UOM"), { target: { value: "m" } });
     fireEvent.change(within(editor).getByLabelText("Rate (KSh per selected UOM)"), { target: { value: "0.5" } });
     fireEvent.click(within(editor).getByRole("button", { name: "Save changes" }));
     expect(JSON.parse(localStorage.getItem("inventory-managed-items")).find((item) => item.id === "ITM-1").stock).toBeCloseTo(4.5);
     expect(screen.getByText(/Annual expenditure/).closest("section")).toHaveTextContent("KSh 250.00");
-    expect(screen.getByRole("row", { name: /500 m.*EDIT-1/ })).toBeInTheDocument();
+    const updatedCells = within(receiptCheckbox("EDIT-1").closest("tr")).getAllByRole("cell");
+    expect(updatedCells[4]).toHaveTextContent(/^500$/);
+    expect(updatedCells[5]).toHaveTextContent(/^m$/);
+    expect(JSON.parse(localStorage.getItem("inventory-stock-movements"))[0].reference).toBe("EDIT-1");
 
-    fireEvent.click(screen.getByLabelText("Select stock in EDIT-1"));
+    fireEvent.click(receiptCheckbox("EDIT-1"));
     fireEvent.click(screen.getByRole("button", { name: "Actions" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
     expect(JSON.parse(localStorage.getItem("inventory-managed-items")).find((item) => item.id === "ITM-1").stock).toBeCloseTo(4);
@@ -862,7 +871,7 @@ test("inventory report blocks purchase-order receipt changes and unsafe stock re
     fireEvent.click(screen.getByRole("button", { name: "Record stock out" }));
     rerender(<MemoryRouter><InventoryProvider><InventoryStock /></InventoryProvider></MemoryRouter>);
 
-    const orderCheckbox = screen.getAllByLabelText("Select stock in PO:005")[0];
+    const orderCheckbox = receiptCheckbox("PO:005");
     fireEvent.click(orderCheckbox);
     fireEvent.click(screen.getByRole("button", { name: "Actions" }));
     expect(screen.getByRole("menuitem", { name: "Edit" })).toBeDisabled();
@@ -870,7 +879,7 @@ test("inventory report blocks purchase-order receipt changes and unsafe stock re
     expect(screen.getByText(/Purchase-order receipts cannot be edited/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Actions" }));
     fireEvent.click(orderCheckbox);
-    fireEvent.click(screen.getByLabelText("Select stock in MANUAL"));
+    fireEvent.click(receiptCheckbox("MANUAL"));
     fireEvent.click(screen.getByRole("button", { name: "Actions" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Edit" }));
     const editor = screen.getByRole("heading", { name: "Edit Stock In record" }).closest("section");
@@ -881,7 +890,7 @@ test("inventory report blocks purchase-order receipt changes and unsafe stock re
     fireEvent.click(screen.getByRole("button", { name: "Actions" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
     expect(screen.getByRole("alert")).toHaveTextContent("Cannot remove the stock-in movement");
-    expect(screen.getByLabelText("Select stock in MANUAL")).toBeInTheDocument();
+    expect(receiptCheckbox("MANUAL")).toBeInTheDocument();
   } finally {
     confirmSpy.mockRestore();
   }
@@ -893,12 +902,119 @@ test("inventory report denies stock changes without Stock In menu access", () =>
     { id: "receipt", itemId: "ITM-1", item: "Cable", movementType: "in", date: `${new Date().getFullYear()}-01-03`, quantity: 1, uom: "km", reference: "PRIVATE" },
   ]));
   render(<MemoryRouter><InventoryProvider><InventoryStock user={{ role: "Requester" }} /></InventoryProvider></MemoryRouter>);
-  fireEvent.click(screen.getByLabelText("Select stock in PRIVATE"));
+  fireEvent.click(screen.getByLabelText("Select stock in receipt"));
   fireEvent.click(screen.getByRole("button", { name: "Actions" }));
   expect(screen.getByRole("menuitem", { name: "Edit" })).toBeDisabled();
   expect(screen.getByRole("menuitem", { name: "Delete" })).toBeDisabled();
   expect(screen.queryByRole("menuitem", { name: "Upload spreadsheet" })).not.toBeInTheDocument();
   expect(screen.queryByRole("menuitem", { name: "Manage categories" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("menuitem", { name: "Add item" })).not.toBeInTheDocument();
+});
+
+test("inventory adds a new item and opening receipt and retains both after reload", () => {
+  localStorage.setItem("inventory-categories", JSON.stringify(["Cables"]));
+  const page = <MemoryRouter><InventoryProvider><InventoryStock user={{ role: "Director" }} /></InventoryProvider></MemoryRouter>;
+  const { unmount } = render(page);
+  fireEvent.click(screen.getByRole("button", { name: "Actions" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: "Add item" }));
+  let form = screen.getByRole("heading", { name: "Add item to inventory" }).closest("section");
+  expect(within(form).queryByLabelText("Reference")).not.toBeInTheDocument();
+  expect(screen.queryByRole("menuitem", { name: "Add item" })).not.toBeInTheDocument();
+  fireEvent.change(within(form).getByLabelText("SKU"), { target: { value: "FOC-24C" } });
+  fireEvent.click(within(form).getByRole("button", { name: "Close add item" }));
+  expect(screen.queryByRole("heading", { name: "Add item to inventory" })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Actions" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: "Add item" }));
+  expect(screen.getByLabelText("SKU")).toHaveValue("FOC-24C");
+  form = screen.getByRole("heading", { name: "Add item to inventory" }).closest("section");
+  fireEvent.change(within(form).getByLabelText("New item name"), { target: { value: "New cable" } });
+  fireEvent.change(within(form).getByLabelText("Item category"), { target: { value: "Cables" } });
+  fireEvent.change(within(form).getByLabelText("Unit of measure"), { target: { value: "m" } });
+  fireEvent.change(within(form).getByLabelText("Receipt date"), { target: { value: "2024-06-02" } });
+  fireEvent.change(within(form).getByLabelText("Quantity"), { target: { value: "4" } });
+  fireEvent.change(within(form).getByLabelText("Unit cost (KSh)"), { target: { value: "25" } });
+  fireEvent.click(within(form).getByRole("button", { name: "Save item and receipt" }));
+  expect(screen.getByRole("alert")).toHaveTextContent("SKU already exists");
+  expect(JSON.parse(localStorage.getItem("inventory-stock-movements"))).toHaveLength(0);
+
+  fireEvent.change(within(form).getByLabelText("SKU"), { target: { value: "NEW-CAB" } });
+  fireEvent.change(within(form).getByLabelText("Quantity"), { target: { value: "0" } });
+  fireEvent.submit(within(form).getByRole("button", { name: "Save item and receipt" }).closest("form"));
+  expect(screen.getByRole("alert")).toHaveTextContent("quantity must be greater than zero");
+  expect(JSON.parse(localStorage.getItem("inventory-managed-items")).some((item) => item.sku === "NEW-CAB")).toBe(false);
+  fireEvent.change(within(form).getByLabelText("Quantity"), { target: { value: "4" } });
+  fireEvent.click(within(form).getByRole("button", { name: "Save item and receipt" }));
+  expect(screen.getByRole("status")).toHaveTextContent("New cable added and stock received");
+  expect(screen.getByRole("row", { name: /New cable.*4 m/ })).toBeInTheDocument();
+  expect(JSON.parse(localStorage.getItem("inventory-managed-items")).find((item) => item.sku === "NEW-CAB"))
+    .toMatchObject({ name: "New cable", category: "Cables", stock: 4, uom: "m", unitCost: 25 });
+  expect(JSON.parse(localStorage.getItem("inventory-categories"))).toContain("Cables");
+  unmount();
+  render(page);
+  fireEvent.change(screen.getByLabelText("Year"), { target: { value: "2024" } });
+  expect(screen.getByRole("row", { name: /New cable.*4 m/ })).toBeInTheDocument();
+});
+
+test("inventory can record a new item as purchased stock", () => {
+  render(<MemoryRouter><InventoryProvider><InventoryStock user={{ role: "Director" }} /></InventoryProvider></MemoryRouter>);
+  fireEvent.click(screen.getByRole("button", { name: "Actions" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: "Add item" }));
+  const form = screen.getByRole("heading", { name: "Add item to inventory" }).closest("section");
+  fireEvent.change(within(form).getByLabelText("SKU"), { target: { value: "NEW-TOOL" } });
+  fireEvent.change(within(form).getByLabelText("New item name"), { target: { value: "New tool" } });
+  fireEvent.change(within(form).getByLabelText("Unit of measure"), { target: { value: "piece" } });
+  fireEvent.change(within(form).getByLabelText("Quantity"), { target: { value: "2" } });
+  fireEvent.change(within(form).getByLabelText("Unit cost (KSh)"), { target: { value: "50" } });
+  fireEvent.click(within(form).getByLabelText("Purchased stock"));
+  fireEvent.change(within(form).getByLabelText("Purchase supplier"), { target: { value: "SUP-1" } });
+  fireEvent.click(within(form).getByRole("button", { name: "Save item and receipt" }));
+  expect(screen.getByRole("row", { name: /New tool.*2 piece.*FiberLink Distributors/ })).toBeInTheDocument();
+  expect(screen.getByText(/Purchased value/)).toHaveTextContent("KSh 100.00");
+});
+
+test("item dropdown receives stock for an existing item without creating a duplicate", () => {
+  const page = <MemoryRouter><InventoryProvider><InventoryStock user={{ role: "Director" }} /></InventoryProvider></MemoryRouter>;
+  const { unmount } = render(page);
+  fireEvent.click(screen.getByRole("button", { name: "Actions" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: "Add item" }));
+  const form = screen.getByRole("heading", { name: "Add item to inventory" }).closest("section");
+  fireEvent.change(within(form).getByLabelText("New item name"), { target: { value: "Draft item" } });
+  fireEvent.change(within(form).getByLabelText("Item name"), { target: { value: "ITM-1" } });
+  expect(within(form).getByText("Stock unit: km")).toBeInTheDocument();
+  expect(within(form).queryByLabelText("New item name")).not.toBeInTheDocument();
+  fireEvent.change(within(form).getByLabelText("Item name"), { target: { value: "" } });
+  expect(within(form).getByLabelText("New item name")).toHaveValue("Draft item");
+  fireEvent.change(within(form).getByLabelText("Item name"), { target: { value: "ITM-1" } });
+  fireEvent.change(within(form).getByLabelText("Receipt date"), { target: { value: "2024-06-02" } });
+  fireEvent.change(within(form).getByLabelText("Quantity"), { target: { value: "2" } });
+  fireEvent.click(within(form).getByLabelText("Purchased stock"));
+  fireEvent.change(within(form).getByLabelText("Purchase supplier"), { target: { value: "SUP-1" } });
+  fireEvent.change(within(form).getByLabelText("Unit cost (KSh)"), { target: { value: "100" } });
+  fireEvent.click(within(form).getByRole("button", { name: "Record receipt" }));
+  expect(screen.getByRole("status")).toHaveTextContent("Stock received for 24-Core Fiber Optic Cable");
+  expect(screen.getByRole("row", { name: /24-Core Fiber Optic Cable.*2 km/ })).toBeInTheDocument();
+  const savedItems = JSON.parse(localStorage.getItem("inventory-managed-items"));
+  expect(savedItems.filter((item) => item.id === "ITM-1")).toHaveLength(1);
+  expect(savedItems.find((item) => item.id === "ITM-1")).toMatchObject({ stock: 6, unitCost: 58500 });
+  unmount();
+  render(page);
+  fireEvent.change(screen.getByLabelText("Year"), { target: { value: "2024" } });
+  expect(screen.getByRole("row", { name: /24-Core Fiber Optic Cable.*2 km/ })).toBeInTheDocument();
+});
+
+test("item dropdown excludes archived items and records other receipts", () => {
+  render(<MemoryRouter><InventoryProvider><InventoryStock user={{ role: "Director" }} /><ReferencedItemArchiveProbe /></InventoryProvider></MemoryRouter>);
+  fireEvent.click(screen.getByRole("button", { name: "Archive cable" }));
+  fireEvent.click(screen.getByRole("button", { name: "Actions" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: "Add item" }));
+  const form = screen.getByRole("heading", { name: "Add item to inventory" }).closest("section");
+  expect(within(form).queryByRole("option", { name: /24-Core Fiber Optic Cable/ })).not.toBeInTheDocument();
+  fireEvent.change(within(form).getByLabelText("Item name"), { target: { value: "ITM-2" } });
+  fireEvent.change(within(form).getByLabelText("Quantity"), { target: { value: "3" } });
+  fireEvent.click(within(form).getByRole("button", { name: "Record receipt" }));
+  expect(screen.getByRole("row", { name: /12V 100Ah Deep Cycle Battery.*3 piece/ })).toBeInTheDocument();
+  expect(screen.getByText(/Purchased value/)).toHaveTextContent("KSh 0.00");
+  expect(JSON.parse(localStorage.getItem("inventory-managed-items")).find((item) => item.id === "ITM-2").stock).toBe(17);
 });
 
 test("inventory categories can be added, assigned per receipt and renamed across records", () => {
@@ -918,19 +1034,19 @@ test("inventory categories can be added, assigned per receipt and renamed across
   fireEvent.change(screen.getByLabelText("New category"), { target: { value: "network tools" } });
   fireEvent.click(screen.getByRole("button", { name: "Add category" }));
   expect(screen.getByRole("alert")).toHaveTextContent("already exists");
-  fireEvent.click(screen.getByLabelText("Select stock in MANUAL"));
+  fireEvent.click(screen.getByLabelText("Select stock in manual"));
   fireEvent.change(screen.getByLabelText("Category for selected receipt"), { target: { value: "Network Tools" } });
   fireEvent.click(screen.getByRole("button", { name: "Update selected receipt category" }));
-  expect(screen.getByRole("row", { name: /Network Tools.*MANUAL/ })).toBeInTheDocument();
-  expect(screen.getByRole("row", { name: /Fiber Optics.*PO-RECEIPT/ })).toBeInTheDocument();
+  expect(JSON.parse(localStorage.getItem("inventory-stock-movements")).find((movement) => movement.id === "manual").category).toBe("Network Tools");
+  expect(JSON.parse(localStorage.getItem("inventory-stock-movements")).find((movement) => movement.id === "order").category).toBe("Fiber Optics");
 
   fireEvent.change(screen.getByLabelText("Category to rename"), { target: { value: "Fiber Optics" } });
   fireEvent.change(screen.getByLabelText("Rename category to"), { target: { value: "Fibre Network" } });
   fireEvent.click(screen.getByRole("button", { name: "Rename category" }));
   expect(JSON.parse(localStorage.getItem("inventory-managed-items")).find((item) => item.id === "ITM-1").category).toBe("Fibre Network");
   expect(JSON.parse(localStorage.getItem("inventory-transactions"))[0].category).toBe("Fibre Network");
-  expect(screen.getByRole("row", { name: /Fibre Network.*PO-RECEIPT/ })).toBeInTheDocument();
-  fireEvent.click(screen.getByLabelText("Select stock in PO-RECEIPT"));
+  expect(JSON.parse(localStorage.getItem("inventory-stock-movements")).find((movement) => movement.id === "order").category).toBe("Fibre Network");
+  fireEvent.click(screen.getByLabelText("Select stock in order"));
   fireEvent.change(screen.getByLabelText("Category for selected receipt"), { target: { value: "Network Tools" } });
   fireEvent.click(screen.getByRole("button", { name: "Update selected receipt category" }));
   const order = JSON.parse(localStorage.getItem("inventory-stock-movements")).find((movement) => movement.id === "order");
@@ -938,10 +1054,158 @@ test("inventory categories can be added, assigned per receipt and renamed across
   expect(screen.getByText(/Purchased value/)).toHaveTextContent("KSh 20.00");
   unmount();
   render(page);
-  expect(screen.getAllByRole("row", { name: /Network Tools/ })).toHaveLength(2);
+  fireEvent.change(screen.getByLabelText("Category"), { target: { value: "Network Tools" } });
+  expect(screen.getByLabelText("Select stock in manual")).toBeInTheDocument();
+  expect(screen.getByLabelText("Select stock in order")).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "Actions" }));
   fireEvent.click(screen.getByRole("menuitem", { name: "Manage categories" }));
   expect(within(screen.getByLabelText("Category to rename")).getByRole("option", { name: "Fibre Network" })).toBeInTheDocument();
+});
+
+test("deleting an in-use category reassigns records without changing stock or purchase values", () => {
+  const date = `${new Date().getFullYear()}-01-03`;
+  localStorage.setItem("inventory-stock-movements", JSON.stringify([
+    { id: "receipt", itemId: "ITM-1", item: "Cable", movementType: "in", date, quantity: 2, uom: "km", category: "Fiber Optics", notes: "Purchase order receipt", isPurchase: true, supplierId: "SUP-1", supplier: "FiberLink Distributors", unitCost: 10 },
+  ]));
+  localStorage.setItem("inventory-transactions", JSON.stringify([{ category: "fiber optics", item: "Historical cable" }]));
+  const confirmSpy = jest.spyOn(window, "confirm").mockReturnValueOnce(false).mockReturnValueOnce(true);
+  try {
+    const page = <MemoryRouter><InventoryProvider><InventoryStock /><InventoryDashboard /></InventoryProvider></MemoryRouter>;
+    const { unmount } = render(page);
+    const keys = ["inventory-managed-items", "inventory-stock-movements", "inventory-transactions", "inventory-managed-purchase-orders"];
+    const before = keys.map((key) => JSON.parse(localStorage.getItem(key)));
+    fireEvent.change(screen.getByLabelText("Category"), { target: { value: "Fiber Optics" } });
+    fireEvent.click(screen.getByRole("button", { name: "Actions" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Manage categories" }));
+    expect(within(screen.getByLabelText("Category to delete")).queryByRole("option", { name: "General Materials" })).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Category to delete"), { target: { value: "Fiber Optics" } });
+    fireEvent.change(screen.getByLabelText("Move records to"), { target: { value: "Power & Backup" } });
+    fireEvent.click(screen.getByRole("button", { name: "Delete category" }));
+    expect(keys.map((key) => JSON.parse(localStorage.getItem(key)))).toEqual(before);
+    fireEvent.click(screen.getByRole("button", { name: "Delete category" }));
+    expect(screen.getByRole("status")).toHaveTextContent("records reassigned");
+    const after = keys.map((key) => JSON.parse(localStorage.getItem(key)));
+    expect(after[0]).toEqual(before[0].map((item) => item.category === "Fiber Optics" ? { ...item, category: "Power & Backup" } : item));
+    expect(after[1]).toEqual(before[1].map((movement) => ({ ...movement, category: "Power & Backup" })));
+    expect(after[2]).toEqual([{ ...before[2][0], category: "Power & Backup" }]);
+    expect(after[3]).toEqual(before[3]);
+    expect(screen.getByLabelText("Category")).toHaveValue("Power & Backup");
+    expect(screen.getByRole("heading", { name: "Purchase expenditure by category" }).closest("section")).toHaveTextContent("KSh 20.00");
+    unmount();
+    render(page);
+    expect(within(screen.getByLabelText("Category")).queryByRole("option", { name: "Fiber Optics" })).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Select stock in receipt")).toBeInTheDocument();
+  } finally {
+    confirmSpy.mockRestore();
+  }
+});
+
+test.each([
+  ["items", "Manage inventory categories"],
+  ["stock-in", "Manage categories"],
+])("categories can be renamed and deleted on the %s page", (section, heading) => {
+  localStorage.setItem("inventory-categories", JSON.stringify(["Extra"]));
+  const confirmSpy = jest.spyOn(window, "confirm").mockReturnValue(true);
+  try {
+    render(<MemoryRouter><InventoryProvider><InventorySubmenu section={section} /></InventoryProvider></MemoryRouter>);
+    const manager = screen.getByRole("heading", { name: heading }).closest("section");
+    if (section === "stock-in") fireEvent.change(screen.getByLabelText("Item", { selector: "select" }), { target: { value: "ITM-1" } });
+    const formCategory = screen.getByLabelText("Category");
+    fireEvent.change(formCategory, { target: { value: "Extra" } });
+    if (section === "items") fireEvent.change(screen.getByLabelText("Material category"), { target: { value: " extra " } });
+    fireEvent.change(within(manager).getByLabelText("Category to rename"), { target: { value: "Extra" } });
+    fireEvent.change(within(manager).getByLabelText("Rename category to"), { target: { value: "Supplies" } });
+    fireEvent.click(within(manager).getByRole("button", { name: "Rename category" }));
+    expect(JSON.parse(localStorage.getItem("inventory-categories"))).toContain("Supplies");
+    expect(formCategory).toHaveValue("Supplies");
+    if (section === "items") expect(screen.getByLabelText("Material category")).toHaveValue("Supplies");
+    fireEvent.change(within(manager).getByLabelText("Category to delete"), { target: { value: "Supplies" } });
+    fireEvent.change(within(manager).getByLabelText("Move records to"), { target: { value: "General Materials" } });
+    fireEvent.click(within(manager).getByRole("button", { name: "Delete category" }));
+    expect(JSON.parse(localStorage.getItem("inventory-categories"))).not.toContain("Supplies");
+    expect(formCategory).toHaveValue("General Materials");
+    if (section === "items") expect(screen.getByLabelText("Material category")).toHaveValue("General Materials");
+  } finally {
+    confirmSpy.mockRestore();
+  }
+});
+
+test("category deletion validates source and replacement and protects the default", () => {
+  function CategoryValidationProbe() {
+    const { deleteInventoryCategory, renameInventoryCategory } = useInventory();
+    const [error, setError] = React.useState("");
+    const attempt = (action) => {
+      try {
+        action();
+        setError("Unexpected success");
+      } catch (failure) {
+        setError(failure.message);
+      }
+    };
+    return <>
+      <button onClick={() => attempt(() => deleteInventoryCategory("missing", "General Materials"))}>Missing source</button>
+      <button onClick={() => attempt(() => deleteInventoryCategory("Fiber Optics", "missing"))}>Missing replacement</button>
+      <button onClick={() => attempt(() => deleteInventoryCategory("Fiber Optics", " fiber optics "))}>Same replacement</button>
+      <button onClick={() => attempt(() => deleteInventoryCategory(" general materials ", "Fiber Optics"))}>Delete default</button>
+      <button onClick={() => attempt(() => renameInventoryCategory(" general materials ", "Other"))}>Rename default</button>
+      <output>{error}</output>
+    </>;
+  }
+  render(<InventoryProvider><CategoryValidationProbe /></InventoryProvider>);
+  const before = localStorage.getItem("inventory-managed-items");
+  [
+    ["Missing source", "Choose an existing category to delete."],
+    ["Missing replacement", "Choose a different existing replacement category."],
+    ["Same replacement", "Choose a different existing replacement category."],
+    ["Delete default", "General Materials is the default category and cannot be deleted."],
+    ["Rename default", "General Materials is the default category and cannot be renamed."],
+  ].forEach(([button, error]) => {
+    fireEvent.click(screen.getByRole("button", { name: button }));
+    expect(screen.getByText(error)).toBeInTheDocument();
+  });
+  expect(localStorage.getItem("inventory-managed-items")).toBe(before);
+});
+
+test("changing the category to delete clears a conflicting replacement", () => {
+  render(<MemoryRouter><InventoryProvider><InventorySubmenu section="stock-in" /></InventoryProvider></MemoryRouter>);
+  const source = screen.getByLabelText("Category to delete");
+  const replacement = screen.getByLabelText("Move records to");
+  fireEvent.change(source, { target: { value: "Fiber Optics" } });
+  fireEvent.change(replacement, { target: { value: "Power & Backup" } });
+  fireEvent.change(source, { target: { value: "Power & Backup" } });
+  expect(replacement).toHaveValue("");
+});
+
+test("Stock In categories carry through to inventory filtering and category purchase analysis", () => {
+  const { rerender, unmount } = render(<MemoryRouter><InventoryProvider><InventorySubmenu section="stock-in" /></InventoryProvider></MemoryRouter>);
+  fireEvent.change(screen.getByLabelText("New category"), { target: { value: "Network Tools" } });
+  fireEvent.click(screen.getByRole("button", { name: "Add category" }));
+  fireEvent.change(screen.getByLabelText("Item", { selector: "select" }), { target: { value: "ITM-1" } });
+  expect(screen.getByLabelText("Category")).toHaveValue("Fiber Optics");
+  fireEvent.change(screen.getByLabelText("Category"), { target: { value: "Network Tools" } });
+  fireEvent.change(screen.getByLabelText("Quantity"), { target: { value: "2" } });
+  fireEvent.click(screen.getByLabelText("Purchased stock"));
+  fireEvent.change(screen.getByLabelText("Purchase supplier"), { target: { value: "SUP-1" } });
+  fireEvent.change(screen.getByLabelText("Rate (KSh per selected UOM)"), { target: { value: "50" } });
+  fireEvent.click(screen.getByRole("button", { name: "Record stock in" }));
+  expect(JSON.parse(localStorage.getItem("inventory-stock-movements"))[0]).toMatchObject({ category: "Network Tools", quantity: 2 });
+  rerender(<MemoryRouter><InventoryProvider><InventoryStock /><InventoryDashboard /></InventoryProvider></MemoryRouter>);
+  const report = screen.getByRole("heading", { name: "Inventory report" }).closest("section");
+  fireEvent.change(within(report).getByLabelText("Category"), { target: { value: "Network Tools" } });
+  expect(within(report).getByRole("row", { name: /Network Tools/ })).toHaveTextContent("KSh 100.00");
+  const chart = screen.getByRole("heading", { name: "Purchase expenditure by category" }).closest("section");
+  expect(chart).toHaveTextContent("Network Tools was among the highest-value categories");
+  expect(chart).toHaveTextContent("KSh 100.00 (100% of purchase value)");
+  unmount();
+  render(<MemoryRouter><InventoryProvider><InventoryStock /></InventoryProvider></MemoryRouter>);
+  fireEvent.change(screen.getByLabelText("Category"), { target: { value: "Network Tools" } });
+  expect(screen.getByRole("row", { name: /Network Tools/ })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("checkbox", { name: /Select stock in MOV-/ }));
+  fireEvent.click(screen.getByRole("button", { name: "Actions" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: "Edit" }));
+  fireEvent.change(screen.getByLabelText("Receipt category"), { target: { value: "Power & Backup" } });
+  fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+  expect(JSON.parse(localStorage.getItem("inventory-stock-movements"))[0].category).toBe("Power & Backup");
 });
 
 test("stock register filters receipt history without mixing purchases and other receipts", () => {
@@ -954,22 +1218,45 @@ test("stock register filters receipt history without mixing purchases and other 
   render(<MemoryRouter><InventoryProvider><InventoryStock /></InventoryProvider></MemoryRouter>);
   fireEvent.change(screen.getByLabelText("Year"), { target: { value: "2026" } });
   const report = screen.getByRole("heading", { name: "Inventory report" }).closest("section");
-  expect(within(report).getByText("PO-01")).toBeInTheDocument();
-  expect(within(report).getByText("PO-02")).toBeInTheDocument();
-  expect(within(report).getByText("RETURN")).toBeInTheDocument();
-  expect(within(report).queryByText("ISSUE-1")).not.toBeInTheDocument();
+  expect(within(report).getByRole("columnheader", { name: "Date" })).toBeInTheDocument();
+  expect(within(report).getByRole("columnheader", { name: "Quantity" })).toBeInTheDocument();
+  expect(within(report).getByRole("columnheader", { name: "UOM" })).toBeInTheDocument();
+  const receiptCells = within(screen.getByLabelText("Select stock in jan").closest("tr")).getAllByRole("cell");
+  expect(receiptCells[3]).toHaveTextContent(/^Fiber$/);
+  expect(receiptCells[4]).toHaveTextContent(/^300$/);
+  expect(receiptCells[5]).toHaveTextContent(/^m$/);
+  const otherReceiptCells = within(screen.getByLabelText("Select stock in return").closest("tr")).getAllByRole("cell");
+  expect(otherReceiptCells[4]).toHaveTextContent(/^1$/);
+  expect(otherReceiptCells[5]).toHaveTextContent(/^km$/);
+  expect(within(report).getByRole("columnheader", { name: "Category" })).toHaveClass("no-print");
+  expect(within(report).getByRole("columnheader", { name: "Quantity" })).not.toHaveClass("no-print");
+  expect(within(report).getByRole("columnheader", { name: "UOM" })).not.toHaveClass("no-print");
+  expect(within(report).queryByRole("columnheader", { name: "Quantity / UOM" })).not.toBeInTheDocument();
+  expect(within(report).queryByRole("columnheader", { name: /^(Received|SKU|Type)$/ })).not.toBeInTheDocument();
+  expect(within(screen.getByLabelText("Select stock in jan").closest("tr")).queryByText("CABLE")).not.toBeInTheDocument();
+  expect(within(screen.getByLabelText("Select stock in jan").closest("tr")).getByText("Fiber")).toBeInTheDocument();
+  expect(within(report).getByLabelText("Select stock in jan")).toBeInTheDocument();
+  expect(within(report).getByLabelText("Select stock in dec")).toBeInTheDocument();
+  expect(within(report).getByLabelText("Select stock in return")).toBeInTheDocument();
+  expect(within(report).queryByLabelText("Select stock in issue")).not.toBeInTheDocument();
+  expect(within(report).queryByRole("columnheader", { name: "Reference" })).not.toBeInTheDocument();
+  expect(within(report).queryByText("PO-01")).not.toBeInTheDocument();
   expect(JSON.parse(localStorage.getItem("inventory-stock-movements"))).toHaveLength(4);
   expect(report).toHaveTextContent("Purchased value KSh 700.00");
   fireEvent.change(within(report).getByLabelText("Month"), { target: { value: "01" } });
   fireEvent.change(within(report).getByLabelText("Receipt type"), { target: { value: "purchase" } });
-  expect(within(report).getByText("300 m")).toBeInTheDocument();
-  expect(within(report).queryByText("RETURN")).not.toBeInTheDocument();
-  expect(within(report).queryByText("PO-02")).not.toBeInTheDocument();
+  expect(within(report).getByText("300")).toBeInTheDocument();
+  expect(within(report).getByText("m")).toBeInTheDocument();
+  expect(within(report).queryByLabelText("Select stock in return")).not.toBeInTheDocument();
+  expect(within(report).queryByLabelText("Select stock in dec")).not.toBeInTheDocument();
   expect(report).toHaveTextContent("Purchased value KSh 600.00");
   fireEvent.change(within(report).getByLabelText("Search receipts"), { target: { value: "fiber supplier" } });
-  expect(within(report).getByText("PO-01")).toBeInTheDocument();
+  expect(within(report).getByLabelText("Select stock in jan")).toBeInTheDocument();
   fireEvent.change(within(report).getByLabelText("Category"), { target: { value: "Power" } });
-  expect(within(report).getByText("No stock received matches these filters.")).toBeInTheDocument();
+  const emptyCells = within(report).getAllByText("No stock received matches these filters.");
+  expect(emptyCells).toHaveLength(2);
+  expect(emptyCells[0]).toHaveAttribute("colspan", "9");
+  expect(emptyCells[1]).toHaveAttribute("colspan", "7");
 });
 
 test("stock report exports filtered receipt quantities and calculated purchase totals", async () => {
@@ -996,9 +1283,11 @@ test("stock report exports filtered receipt quantities and calculated purchase t
       reader.readAsText(blob);
     });
     expect(text).toContain('"Receipt date","SKU","Item","Category","Type","Quantity","UOM"');
-    expect(text).toContain('"2026-01-03","CABLE","Cable","Fiber","Purchase","300","m","Fiber supplier","2","600","PO-01"');
+    expect(text).toContain('"2026-01-03","CABLE","Cable","Fiber","Purchase","300","m","Fiber supplier","2","600"');
+    expect(text).not.toContain("Reference");
+    expect(text).not.toContain("PO-01");
     expect(text).not.toContain("Battery");
-    fireEvent.click(screen.getByLabelText("Select stock in PO-01"));
+    fireEvent.click(screen.getByLabelText("Select stock in jan"));
     fireEvent.click(screen.getByRole("button", { name: "Actions" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Download (JSON)" }));
     const json = await new Promise((resolve, reject) => {
@@ -1010,7 +1299,7 @@ test("stock report exports filtered receipt quantities and calculated purchase t
     expect(json).toEqual([{
       "Receipt date": "2026-01-03", SKU: "CABLE", Item: "Cable", Category: "Fiber",
       Type: "Purchase", Quantity: 300, UOM: "m", Supplier: "Fiber supplier",
-      "Unit cost (KSh)": 2, "Total (KSh)": 600, Reference: "PO-01", Notes: "",
+      "Unit cost (KSh)": 2, "Total (KSh)": 600, Notes: "",
     }]);
     await waitFor(() => expect(URL.revokeObjectURL).toHaveBeenCalledTimes(2), { timeout: 2000 });
   } finally {
@@ -1065,7 +1354,7 @@ test("reviewed spreadsheet stock receipts validate all rows before adjusting sto
   expect(suppliers).toHaveLength(3);
   expect(movements.filter((movement) => movement.itemId === newItem.id && movement.supplierId === newSupplier.id)).toHaveLength(2);
   fireEvent.change(within(register).getByLabelText("Year"), { target: { value: "2026" } });
-  expect(within(register).getByText("INV-1")).toBeInTheDocument();
+  expect(receiptCheckbox("INV-1")).toBeInTheDocument();
   const dashboardPage = screen.getByRole("heading", { name: "Inventory Dashboard" }).closest(".procurement-dashboard");
   fireEvent.change(within(dashboardPage).getByLabelText("Year"), { target: { value: "2026" } });
   const dashboard = screen.getByText("Annual expenditure · 2026").closest("section");
@@ -1219,28 +1508,125 @@ test("stock import refuses ambiguous existing items without creating records", a
   expect(JSON.parse(localStorage.getItem("inventory-managed-suppliers"))).toHaveLength(2);
 });
 
-test("suppliers referenced by stock receipts cannot be deleted", () => {
+test("removing a supplier preserves linked history even with missing receipts, and can be restored", () => {
   localStorage.setItem("inventory-managed-suppliers", JSON.stringify([
     { id: "SUP-NEW", name: "New supplier", email: "", leadTimeDays: null, paymentTerms: "" },
+    { id: "SUP-OTHER", name: "Other supplier", email: "", leadTimeDays: null, paymentTerms: "" },
+  ]));
+  localStorage.setItem("inventory-managed-items", JSON.stringify([
+    { id: "ITM-X", sku: "CABLE-X", name: "Cable", category: "Fiber", unitCost: 10, stock: 6, reorderLevel: 0, uom: "m" },
+  ]));
+  localStorage.setItem("inventory-managed-purchase-orders", JSON.stringify([
+    { id: "order-1", orderNumber: "PO:100", supplierId: "SUP-NEW", quotationId: "quote-1", date: "2026-01-01", status: "Received", lineItems: [{ itemId: "ITM-X", quantity: 2, unitCost: 10, uom: "m" }] },
+    { id: "order-2", orderNumber: "PO:101", supplierId: "SUP-OTHER", date: "2026-01-01", status: "Pending", lineItems: [{ itemId: "ITM-X", quantity: 1, unitCost: 10, uom: "m" }] },
+  ]));
+  localStorage.setItem("inventory-quotations", JSON.stringify([
+    { id: "quote-1", supplierId: "SUP-NEW", prId: "request-1", status: "Selected", lineItems: [] },
+    { id: "quote-2", supplierId: "SUP-OTHER", prId: "request-1", status: "Submitted", lineItems: [] },
+  ]));
+  localStorage.setItem("inventory-purchase-requests", JSON.stringify([
+    { id: "request-1", status: "Quoted", lineItems: [] },
+  ]));
+  localStorage.setItem("inventory-supplier-invoices", JSON.stringify([
+    { id: "invoice-1", supplierId: "SUP-NEW", purchaseOrderId: "order-1", payments: [{ id: "payment-1" }] },
+    { id: "invoice-2", supplierId: "SUP-NEW", purchaseOrderId: "", payments: [] },
+    { id: "invoice-3", supplierId: "SUP-OTHER", purchaseOrderId: "order-2", payments: [] },
   ]));
   localStorage.setItem("inventory-stock-movements", JSON.stringify([
-    { id: "receipt", itemId: "ITM-1", movementType: "in", quantity: 1, uom: "km", supplierId: "SUP-NEW", isPurchase: true },
+    { id: "manual-receipt", itemId: "ITM-X", item: "Cable", movementType: "in", quantity: 1, uom: "m", supplierId: "SUP-NEW", isPurchase: true, unitCost: 10, date: "2026-01-02" },
+    { id: "other-receipt", itemId: "ITM-X", item: "Cable", movementType: "in", quantity: 1, uom: "m", supplierId: "SUP-OTHER", isPurchase: true, unitCost: 10, date: "2026-01-03" },
   ]));
-  const confirmSpy = jest.spyOn(window, "confirm").mockReturnValue(true);
+  const confirmSpy = jest.spyOn(window, "confirm").mockReturnValueOnce(false).mockReturnValueOnce(true);
   try {
-    render(<MemoryRouter><InventoryProvider><InventorySubmenu section="suppliers" /></InventoryProvider></MemoryRouter>);
+    const { unmount } = render(<MemoryRouter><InventoryProvider><InventorySubmenu section="suppliers" /></InventoryProvider></MemoryRouter>);
+    const keys = ["inventory-managed-items", "inventory-managed-purchase-orders", "inventory-stock-movements", "inventory-supplier-invoices", "inventory-quotations", "inventory-purchase-requests"];
+    const original = keys.map((key) => localStorage.getItem(key));
     fireEvent.click(screen.getByLabelText("Select New supplier"));
     fireEvent.click(screen.getByRole("button", { name: "Actions" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
-    expect(screen.getByRole("alert")).toHaveTextContent("used by procurement history and cannot be deleted");
-    expect(JSON.parse(localStorage.getItem("inventory-managed-suppliers"))).toHaveLength(1);
+    expect(confirmSpy.mock.calls[0][0]).toMatch(/history will be kept/i);
+    expect(JSON.parse(localStorage.getItem("inventory-managed-suppliers"))).toHaveLength(2);
     fireEvent.click(screen.getByRole("button", { name: "Actions" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Edit" }));
     expect(screen.getByLabelText("Lead time (days)")).toHaveValue(null);
     expect(screen.getByLabelText("Payment terms")).toHaveValue("");
+    fireEvent.click(screen.getByRole("button", { name: "Actions" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
+    expect(screen.getByRole("status")).toHaveTextContent("History has been kept");
+    expect(screen.queryByRole("heading", { name: "Add supplier" })).not.toBeInTheDocument();
+    expect(keys.map((key) => localStorage.getItem(key))).toEqual(original);
+    expect(JSON.parse(localStorage.getItem("inventory-managed-suppliers")).find((supplier) => supplier.id === "SUP-NEW").archived).toBe(true);
+    unmount();
+    render(<MemoryRouter><InventoryProvider><InventorySubmenu section="suppliers" /></InventoryProvider></MemoryRouter>);
+    expect(screen.queryByLabelText("Select New supplier")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Select Other supplier")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Restore New supplier" }));
+    expect(screen.getByLabelText("Select New supplier")).toBeInTheDocument();
+    expect(keys.map((key) => localStorage.getItem(key))).toEqual(original);
   } finally {
     confirmSpy.mockRestore();
   }
+});
+
+test("supplier contact details are optional, editable, and shown on a purchase order", () => {
+  const { unmount } = render(<InventoryProvider><InventorySubmenu section="suppliers" /></InventoryProvider>);
+  expect(screen.queryByLabelText("Supplier name")).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Actions" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: "Add supplier" }));
+  fireEvent.change(screen.getByLabelText("Supplier name"), { target: { value: "Contact Supplier" } });
+  fireEvent.change(screen.getByLabelText("Phone number (optional)"), { target: { value: "  012345  " } });
+  fireEvent.change(screen.getByLabelText("Address (optional)"), { target: { value: "  Main Street  " } });
+  fireEvent.click(screen.getByRole("button", { name: "Add supplier" }));
+  const supplier = JSON.parse(localStorage.getItem("inventory-managed-suppliers")).find((entry) => entry.name === "Contact Supplier");
+  expect(supplier).toMatchObject({ email: "", phone: "012345", address: "Main Street" });
+  fireEvent.click(screen.getByLabelText("Select Contact Supplier"));
+  fireEvent.click(screen.getByRole("button", { name: "Actions" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: "Edit" }));
+  fireEvent.change(screen.getByLabelText("Address (optional)"), { target: { value: "New Address" } });
+  fireEvent.click(screen.getByRole("button", { name: "Save supplier changes" }));
+  unmount();
+  render(<InventoryProvider><ProcurementPurchaseOrdersProbe /></InventoryProvider>);
+  fireEvent.change(screen.getByLabelText("Supplier"), { target: { value: supplier.id } });
+  const details = screen.getByLabelText("Selected supplier details");
+  expect(details).toHaveTextContent("012345");
+  expect(details).toHaveTextContent("New Address");
+  expect(details).toHaveTextContent("Net 30");
+});
+
+test("supplier list shows cumulative recorded purchase spend per supplier", () => {
+  localStorage.setItem("inventory-managed-suppliers", JSON.stringify([
+    { id: "SUP-1", name: "Alpha" },
+    { id: "SUP-2", name: "Beta" },
+  ]));
+  localStorage.setItem("inventory-stock-movements", JSON.stringify([
+    { id: "alpha-one", supplierId: "SUP-1", movementType: "in", isPurchase: true, quantity: 2, unitCost: 125 },
+    { id: "alpha-two", supplierId: "SUP-1", movementType: "in", isPurchase: true, quantity: 3, unitCost: 100 },
+    { id: "alpha-legacy", supplier: "Alpha", movementType: "in", isPurchase: true, quantity: 2, unitCost: 25 },
+    { id: "alpha-issue", supplierId: "SUP-1", movementType: "out", isPurchase: true, quantity: 1, unitCost: 900 },
+    { id: "alpha-restock", supplierId: "SUP-1", movementType: "in", quantity: 1, unitCost: 900 },
+  ]));
+
+  render(<InventoryProvider><InventorySubmenu section="suppliers" /></InventoryProvider>);
+
+  expect(within(screen.getByRole("row", { name: /Alpha/ })).getByText("KSh 600.00")).toBeInTheDocument();
+  expect(within(screen.getByRole("row", { name: /Beta/ })).getByText("KSh 0.00")).toBeInTheDocument();
+});
+
+test("removed suppliers are unavailable for new orders but remain available on existing orders", () => {
+  localStorage.setItem("inventory-managed-suppliers", JSON.stringify([
+    { id: "SUP-1", name: "Removed supplier", archived: true },
+    { id: "SUP-2", name: "Active supplier" },
+  ]));
+  localStorage.setItem("inventory-managed-purchase-orders", JSON.stringify([{
+    id: "order-1", orderNumber: "PO:001", supplierId: "SUP-1", date: "2026-01-01", status: "Pending",
+    lineItems: [{ itemId: "ITM-1", quantity: 1, unitCost: 10, uom: "km" }],
+  }]));
+  render(<InventoryProvider><ProcurementPurchaseOrdersProbe /></InventoryProvider>);
+  const select = screen.getByLabelText("Supplier");
+  expect(within(select).queryByRole("option", { name: /Removed supplier/ })).not.toBeInTheDocument();
+  editOrder("PO:001");
+  expect(within(screen.getByLabelText("Supplier")).getByRole("option", { name: "Removed supplier (Removed)" }).selected).toBe(true);
+  expect(screen.getByLabelText("Selected supplier details")).toHaveTextContent("Address");
 });
 
 test("stock import shows the source row and date error beside the record button, then saves corrected data", async () => {
@@ -1355,7 +1741,6 @@ test("inventory dashboard shows annual spend and monthly procurement analysis", 
   expect(screen.getByText("Supplier expenditure")).toBeInTheDocument();
   expect(screen.getByText("Monthly expenditure by item")).toBeInTheDocument();
   expect(screen.getByText("Monthly total expenditure")).toBeInTheDocument();
-  expect(screen.getByText("Highest material consumption")).toBeInTheDocument();
   fireEvent.change(screen.getByLabelText("Item"), { target: { value: "ITM-1" } });
   const itemSection = screen.getByRole("heading", { name: "Monthly expenditure by item" }).closest("section");
   fireEvent.click(within(itemSection).getByText("Item monthly values"));
@@ -1364,41 +1749,31 @@ test("inventory dashboard shows annual spend and monthly procurement analysis", 
 
 test("dashboard compares purchased receipts by month with the previous year", () => {
   localStorage.setItem("inventory-stock-movements", JSON.stringify([
-    { id: "previous", itemId: "ITM-1", item: "Cable", sku: "CABLE", movementType: "in", date: "2025-01-03", quantity: 1, uom: "km", isPurchase: true, supplier: "Fiber supplier", unitCost: 100 },
-    { id: "current", itemId: "ITM-1", item: "Cable", sku: "CABLE", movementType: "in", date: "2026-01-05", quantity: 300, uom: "m", isPurchase: true, supplier: "Fiber supplier", unitCost: 2 },
-    { id: "return", itemId: "ITM-1", item: "Cable", sku: "CABLE", movementType: "in", date: "2026-01-06", quantity: 1, uom: "km" },
+    { id: "pre-baseline", itemId: "ITM-1", item: "Cable", sku: "CABLE", movementType: "in", date: "2025-01-03", quantity: 1, uom: "km", isPurchase: true, supplier: "Fiber supplier", unitCost: 50 },
+    { id: "previous", itemId: "ITM-1", item: "Cable", sku: "CABLE", movementType: "in", date: "2026-01-03", quantity: 1, uom: "km", isPurchase: true, supplier: "Fiber supplier", unitCost: 100 },
+    { id: "current", itemId: "ITM-1", item: "Cable", sku: "CABLE", movementType: "in", date: "2027-01-05", quantity: 300, uom: "m", isPurchase: true, supplier: "Fiber supplier", unitCost: 2 },
+    { id: "return", itemId: "ITM-1", item: "Cable", sku: "CABLE", movementType: "in", date: "2027-01-06", quantity: 1, uom: "km" },
+    { id: "later", itemId: "ITM-1", item: "Cable", sku: "CABLE", movementType: "in", date: "2029-01-01", quantity: 1, uom: "km", isPurchase: true, supplier: "Fiber supplier", unitCost: 100 },
   ]));
   render(<InventoryProvider><InventoryDashboard /></InventoryProvider>);
   fireEvent.change(screen.getByLabelText("Year"), { target: { value: "2026" } });
-  expect(screen.getByText("Annual expenditure · 2026").closest("section")).toHaveTextContent("KSh 600.00");
-  expect(screen.getByText("Purchase receipt lines").closest("section")).toHaveTextContent("1");
-  expect(screen.getByText("Suppliers").closest("section")).toHaveTextContent("1");
   const section = screen.getByRole("heading", { name: "Monthly total expenditure" }).closest("section");
+  expect(section).toHaveTextContent("no prior-year comparison available");
   fireEvent.click(within(section).getByText("Monthly values"));
+  expect(within(section).queryByRole("columnheader", { name: "2025" })).not.toBeInTheDocument();
+  fireEvent.change(screen.getByLabelText("Year"), { target: { value: "2027" } });
+  expect(screen.getByText("Annual expenditure · 2027").closest("section")).toHaveTextContent("KSh 600.00");
+  expect(screen.getByText("Purchase receipt lines", { selector: "p" }).closest("section")).toHaveTextContent("1");
+  expect(screen.getByText("Suppliers").closest("section")).toHaveTextContent("1");
+  expect(within(section).getByRole("columnheader", { name: "2026" })).toBeInTheDocument();
   const january = within(section).getByRole("row", { name: /Jan/ });
   expect(january).toHaveTextContent("KSh 600.00");
   expect(january).toHaveTextContent("KSh 100.00");
   const february = within(section).getByRole("row", { name: /Feb/ });
   expect(within(february).getAllByText("KSh 0.00")).toHaveLength(2);
-});
-
-test("consumption compares stock-out quantities only within compatible units", () => {
-  localStorage.setItem("inventory-stock-movements", JSON.stringify([
-    { id: "out-1", itemId: "ITM-1", item: "Cable", movementType: "out", date: "2026-01-01", quantity: 1, uom: "km" },
-    { id: "out-2", itemId: "ITM-1", item: "Cable", movementType: "out", date: "2026-02-01", quantity: 300, uom: "m" },
-    { id: "out-3", itemId: "ITM-2", item: "Battery", movementType: "out", date: "2026-02-01", quantity: 2, uom: "piece" },
-    { id: "in-1", itemId: "ITM-1", item: "Cable", movementType: "in", date: "2026-02-01", quantity: 3, uom: "km" },
-  ]));
-  render(<InventoryProvider><InventoryDashboard /></InventoryProvider>);
-  fireEvent.change(screen.getByLabelText("Year"), { target: { value: "2026" } });
-  fireEvent.change(screen.getByLabelText("Unit"), { target: { value: "m" } });
-  const section = screen.getByRole("heading", { name: "Highest material consumption" }).closest("section");
-  fireEvent.click(within(section).getByText("Consumption values"));
-  expect(within(section).getByText("1300")).toBeInTheDocument();
-  expect(within(section).queryByText("Battery")).not.toBeInTheDocument();
-  fireEvent.change(screen.getByLabelText("Unit"), { target: { value: "piece" } });
-  expect(within(section).getByText("Battery")).toBeInTheDocument();
-  expect(within(section).getByText("2")).toBeInTheDocument();
+  fireEvent.change(screen.getByLabelText("Year"), { target: { value: "2029" } });
+  expect(section).toHaveTextContent("no prior-year comparison available");
+  expect(within(section).queryByRole("columnheader", { name: "2028" })).not.toBeInTheDocument();
 });
 
 test("imported unlinked transactions are retained separately from dashboard expenditure", async () => {
@@ -1434,14 +1809,18 @@ test("imported unlinked transactions are retained separately from dashboard expe
 });
 
 test("supplier and item submenu forms add records through inventory context", () => {
+  localStorage.setItem("inventory-categories", JSON.stringify(["Cables"]));
   const { rerender } = render(
     <InventoryProvider>
       <InventorySubmenu section="suppliers" />
     </InventoryProvider>
   );
 
+  expect(screen.queryByLabelText("Supplier name")).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Actions" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: "Add supplier" }));
   fireEvent.change(screen.getByLabelText("Supplier name"), { target: { value: "New Supplier" } });
-  fireEvent.change(screen.getByLabelText("Email"), { target: { value: "new@example.com" } });
+  fireEvent.change(screen.getByLabelText("Email (optional)"), { target: { value: "new@example.com" } });
   fireEvent.change(screen.getByLabelText("Lead time (days)"), { target: { value: "4" } });
   fireEvent.change(screen.getByLabelText("Payment terms"), { target: { value: "Net 15" } });
   fireEvent.click(screen.getByRole("button", { name: "Add supplier" }));
@@ -1461,7 +1840,7 @@ test("supplier and item submenu forms add records through inventory context", ()
   fireEvent.change(screen.getByLabelText("Reorder level"), { target: { value: "2" } });
   fireEvent.click(screen.getByRole("button", { name: "Add item" }));
   expect(screen.getByText("Fiber Cable")).toBeInTheDocument();
-  expect(screen.getByText("Cables")).toBeInTheDocument();
+  expect(screen.getByRole("row", { name: /Fiber Cable.*Cables/ })).toBeInTheDocument();
   expect(screen.getAllByText("Reorder").length).toBeGreaterThan(0);
 
   const confirmSpy = jest.spyOn(window, "confirm").mockReturnValue(true);

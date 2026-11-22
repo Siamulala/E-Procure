@@ -9,6 +9,17 @@ const companyLogoSvg = `
 
 export const companyLogoDataUri = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(companyLogoSvg)}`;
 
+export function getCompanyDetails() {
+  const stored = typeof window === "undefined" ? null : window.localStorage.getItem("companyDetails");
+  const details = (stored ? JSON.parse(stored) : null) || {};
+  return {
+    name: String(details.name || "Easy-Procure").trim() || "Easy-Procure",
+    address: String(details.address || "").trim(),
+    phone: String(details.phone || "").trim(),
+    email: String(details.email || "").trim(),
+  };
+}
+
 export function getCompanyLogoPngDataUrl() {
   return new Promise((resolve, reject) => {
     const image = new Image();

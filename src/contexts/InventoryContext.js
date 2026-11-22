@@ -394,7 +394,7 @@ export function InventoryProvider({ children }) {
     readStoredValue("roleMenuPermissions", {})
   ));
   const categoriesByKey = new Map();
-  [...customCategories, ...items.map((item) => item.category), ...stockMovements.map((movement) => movement.category), ...inventoryTransactions.map((transaction) => transaction.category)]
+  ["General Materials", ...customCategories, ...items.map((item) => item.category), ...stockMovements.map((movement) => movement.category), ...inventoryTransactions.map((transaction) => transaction.category)]
     .forEach((value) => {
       const name = String(value || "").trim();
       if (name && !categoriesByKey.has(categoryKey(name))) categoriesByKey.set(categoryKey(name), name);
@@ -404,7 +404,7 @@ export function InventoryProvider({ children }) {
     .filter((movement) => movement.movementType === "in" && movement.isPurchase)
     .map((movement) => ({
       id: movement.id, itemId: movement.itemId, date: movement.date, item: movement.item, sku: movement.sku,
-      supplier: movement.supplier, category: movement.category, quantity: movement.quantity,
+      supplier: movement.supplier, category: movement.category || items.find((item) => item.id === movement.itemId)?.category || "General Materials", quantity: movement.quantity,
       uom: movement.uom, amount: movement.unitCost, total: movement.quantity * movement.unitCost,
       reference: movement.reference, notes: movement.notes,
     }));
@@ -479,9 +479,11 @@ export function InventoryProvider({ children }) {
   const addSupplier = (supplier) => {
     const name = String(supplier.name || "").trim();
     const email = String(supplier.email || "").trim();
+    const phone = String(supplier.phone || "").trim();
+    const address = String(supplier.address || "").trim();
     const leadTimeDays = Number(supplier.leadTimeDays);
     const paymentTerms = String(supplier.paymentTerms || "").trim();
-    if (!name || !email || !paymentTerms) throw new Error("Supplier name, email, and payment terms are required.");
+    if (!name || !paymentTerms) throw new Error("Supplier name and payment terms are required.");
     if (!Number.isFinite(leadTimeDays) || leadTimeDays < 0) throw new Error("Lead time must be a non-negative number of days.");
     setSuppliers((previous) => [
       ...previous,
@@ -490,6 +492,8 @@ export function InventoryProvider({ children }) {
         id: createId("SUP"),
         name,
         email,
+        phone,
+        address,
         leadTimeDays,
         paymentTerms,
       },
@@ -499,32 +503,38 @@ export function InventoryProvider({ children }) {
   const updateSupplier = (supplierId, updates) => {
     const existing = suppliers.find((supplier) => supplier.id === supplierId);
     if (!existing) throw new Error("Supplier was not found.");
+    if (existing.archived) throw new Error("Restore this supplier before editing it.");
     const name = String(updates.name || "").trim();
     const email = String(updates.email || "").trim();
+    const phone = String(updates.phone || "").trim();
+    const address = String(updates.address || "").trim();
     const leadTimeDays = Number(updates.leadTimeDays);
     const paymentTerms = String(updates.paymentTerms || "").trim();
-    if (!name || !email || !paymentTerms) throw new Error("Supplier name, email, and payment terms are required.");
+    if (!name || !paymentTerms) throw new Error("Supplier name and payment terms are required.");
     if (!Number.isFinite(leadTimeDays) || leadTimeDays < 0) throw new Error("Lead time must be a non-negative number of days.");
-    const updated = { ...existing, name, email, leadTimeDays, paymentTerms };
+    const updated = { ...existing, name, email, phone, address, leadTimeDays, paymentTerms };
     setSuppliers((previous) => previous.map((supplier) => supplier.id === supplierId ? updated : supplier));
     return updated;
   };
 
   const deleteSuppliers = (supplierIds) => {
     const selectedIds = new Set(supplierIds);
-    const selectedSuppliers = suppliers.filter((supplier) => selectedIds.has(supplier.id));
+    const selectedSuppliers = suppliers.filter((supplier) => selectedIds.has(supplier.id) && !supplier.archived);
     if (!selectedIds.size || selectedSuppliers.length !== selectedIds.size) {
-      throw new Error("One or more suppliers could not be found.");
+      throw new Error("One or more active suppliers could not be found.");
     }
-    const referenced = selectedSuppliers.find((supplier) => (
-      purchaseOrders.some((order) => order.supplierId === supplier.id)
-      || quotations.some((quotation) => quotation.supplierId === supplier.id)
-      || supplierInvoices.some((invoice) => invoice.supplierId === supplier.id)
-      || stockMovements.some((movement) => movement.supplierId === supplier.id)
-    ));
-    if (referenced) throw new Error(`${referenced.name} is used by procurement history and cannot be deleted.`);
-    setSuppliers((previous) => previous.filter((supplier) => !selectedIds.has(supplier.id)));
+    setSuppliers((previous) => previous.map((supplier) => (
+      selectedIds.has(supplier.id) ? { ...supplier, archived: true } : supplier
+    )));
     return selectedSuppliers;
+  };
+
+  const restoreSupplier = (supplierId) => {
+    const supplier = suppliers.find((entry) => entry.id === supplierId);
+    if (!supplier || !supplier.archived) throw new Error("Removed supplier was not found.");
+    setSuppliers((previous) => previous.map((entry) => (
+      entry.id === supplierId ? { ...entry, archived: false } : entry
+    )));
   };
 
   const toCents = (value) => {
@@ -537,7 +547,7 @@ export function InventoryProvider({ children }) {
   };
 
   const addSupplierInvoice = ({ supplierId, number, date, amount, purchaseOrderId }) => {
-    const supplier = suppliers.find((entry) => entry.id === supplierId);
+    const supplier = suppliers.find((entry) => entry.id === supplierId && !entry.archived);
     if (!supplier) throw new Error("Choose a valid supplier.");
     const invoiceNumber = String(number || "").trim();
     if (!invoiceNumber) throw new Error("Invoice number is required.");
@@ -571,8 +581,21 @@ export function InventoryProvider({ children }) {
     return payment;
   };
 
+  const rememberItemCategory = (category) => {
+    const categoryName = String(category || "").trim();
+    if (categoryName) {
+      setCustomCategories((previous) => (
+        previous.some((category) => categoryKey(category) === categoryKey(categoryName))
+          ? previous
+          : [...previous, categoryName]
+      ));
+    }
+  };
+
   const addItem = (item) => {
-    setItems((previous) => [...previous, { ...normalizeItem(item), id: createId("ITM") }]);
+    const normalized = normalizeItem(item);
+    rememberItemCategory(normalized.category);
+    setItems((previous) => [...previous, { ...normalized, id: createId("ITM") }]);
   };
 
   const updateItem = (itemId, updates) => {
@@ -589,6 +612,7 @@ export function InventoryProvider({ children }) {
       ...normalizeItem({ ...existing, ...updates, uom: nextUom, stock, reorderLevel, unitCost }),
       id: itemId,
     };
+    rememberItemCategory(updated.category);
     setItems((previous) => previous.map((item) => item.id === itemId ? updated : item));
     if (nextUom !== existing.uom) {
       setStockMovements((previous) => previous.map((movement) => {
@@ -677,6 +701,7 @@ export function InventoryProvider({ children }) {
     const name = String(value || "").trim();
     const newKey = categoryKey(name);
     if (!categoriesByKey.has(oldKey)) throw new Error("Choose an existing category.");
+    if (oldKey === categoryKey("General Materials")) throw new Error("General Materials is the default category and cannot be renamed.");
     if (!name) throw new Error("Enter a category name.");
     if (newKey !== oldKey && categoriesByKey.has(newKey)) throw new Error("A category with this name already exists.");
     const rename = (record) => categoryKey(record.category) === oldKey ? { ...record, category: name } : record;
@@ -684,6 +709,23 @@ export function InventoryProvider({ children }) {
     setItems((previous) => previous.map(rename));
     setStockMovements((previous) => previous.map(rename));
     setInventoryTransactions((previous) => previous.map(rename));
+    return name;
+  };
+
+  const deleteInventoryCategory = (value, replacement) => {
+    const oldKey = categoryKey(value);
+    const replacementKey = categoryKey(replacement);
+    if (!categoriesByKey.has(oldKey)) throw new Error("Choose an existing category to delete.");
+    if (oldKey === categoryKey("General Materials")) throw new Error("General Materials is the default category and cannot be deleted.");
+    if (!categoriesByKey.has(replacementKey) || replacementKey === oldKey) {
+      throw new Error("Choose a different existing replacement category.");
+    }
+    const name = categoriesByKey.get(replacementKey);
+    const reassign = (record) => categoryKey(record.category) === oldKey ? { ...record, category: name } : record;
+    setCustomCategories((previous) => previous.filter((category) => categoryKey(category) !== oldKey));
+    setItems((previous) => previous.map(reassign));
+    setStockMovements((previous) => previous.map(reassign));
+    setInventoryTransactions((previous) => previous.map(reassign));
     return name;
   };
 
@@ -716,10 +758,12 @@ export function InventoryProvider({ children }) {
     return records.length;
   };
 
-  const prepareStockMovement = ({ itemId, movementType, date, quantity, uom, reference = "", notes = "", isPurchase = false, supplierId = "", unitCost = "" }, inventoryItems = items, inventorySuppliers = suppliers) => {
+  const prepareStockMovement = ({ itemId, movementType, date, quantity, uom, reference = "", notes = "", isPurchase = false, supplierId = "", unitCost = "", category = "" }, inventoryItems = items, inventorySuppliers = suppliers, allowArchivedSupplierId = "") => {
     const item = inventoryItems.find((entry) => entry.id === itemId);
     if (!item) throw new Error("Choose a valid inventory item.");
     if (!["in", "out"].includes(movementType)) throw new Error("Choose stock in or stock out.");
+    const categoryName = category ? categoriesByKey.get(categoryKey(category)) || (categoryKey(category) === categoryKey(item.category) ? item.category : "") : item.category || "General Materials";
+    if (movementType === "in" && !categoryName) throw new Error("Choose an existing category.");
     const movementDate = String(date || "").trim();
     const parsedDate = new Date(`${movementDate}T00:00:00Z`);
     if (!/^\d{4}-\d{2}-\d{2}$/.test(movementDate) || Number.isNaN(parsedDate.getTime()) || parsedDate.toISOString().slice(0, 10) !== movementDate) {
@@ -736,7 +780,7 @@ export function InventoryProvider({ children }) {
     if (movementType === "out" && stockQuantity > balance + 1e-9) {
       throw new Error(`Only ${balance} ${stockUom} of ${item.name} currently in stock.`);
     }
-    const purchaseSupplier = isPurchase && movementType === "in" ? inventorySuppliers.find((supplier) => supplier.id === supplierId) : null;
+    const purchaseSupplier = isPurchase && movementType === "in" ? inventorySuppliers.find((supplier) => supplier.id === supplierId && (!supplier.archived || supplier.id === allowArchivedSupplierId)) : null;
     const purchaseCost = Number(unitCost);
     if (isPurchase && movementType === "in" && (!purchaseSupplier || String(unitCost).trim() === "" || !Number.isFinite(purchaseCost) || purchaseCost < 0)) {
       throw new Error("Choose a supplier and enter a valid non-negative rate.");
@@ -755,7 +799,8 @@ export function InventoryProvider({ children }) {
       quantityInStockUnit: stockQuantity,
       reference: String(reference || "").trim(),
       notes: String(notes || "").trim(),
-      ...(purchaseSupplier ? { isPurchase: true, supplierId, supplier: purchaseSupplier.name, category: item.category, unitCost: purchaseCost } : {}),
+      ...(movementType === "in" ? { category: categoryName } : {}),
+      ...(purchaseSupplier ? { isPurchase: true, supplierId, supplier: purchaseSupplier.name, unitCost: purchaseCost } : {}),
     };
   };
 
@@ -767,6 +812,32 @@ export function InventoryProvider({ children }) {
         ? updateStockBalance(entry, movement.stockUom, Math.max(0, getStockBalance(entry, movement.stockUom) + quantityChange))
         : entry
     )));
+    setStockMovements((previous) => [movement, ...previous]);
+    return movement;
+  };
+
+  const addItemWithReceipt = (input) => {
+    const item = normalizeItem({
+      name: input.name,
+      sku: input.sku,
+      category: input.category,
+      uom: input.uom,
+      unitCost: input.unitCost,
+      reorderLevel: input.reorderLevel,
+      stock: 0,
+      id: createId("ITM"),
+    });
+    if (items.some((existing) => categoryKey(existing.sku) === categoryKey(item.sku))) {
+      throw new Error("An item with this SKU already exists. Record additional stock through Stock In.");
+    }
+    const movement = prepareStockMovement({
+      ...input,
+      itemId: item.id,
+      movementType: "in",
+    }, [item], suppliers);
+    const stockedItem = updateStockBalance(item, movement.stockUom, movement.quantityInStockUnit);
+    rememberItemCategory(item.category);
+    setItems((previous) => [...previous, stockedItem]);
     setStockMovements((previous) => [movement, ...previous]);
     return movement;
   };
@@ -799,6 +870,7 @@ export function InventoryProvider({ children }) {
         const matchingSuppliers = availableSuppliers.filter((supplier) => [supplier.id, supplier.name].some((value) => sameText(value, supplierName)));
         if (matchingSuppliers.length > 1) throw new Error(`More than one supplier is named "${supplierName}". Resolve the duplicate records before importing.`);
         let supplier = matchingSuppliers[0];
+        if (supplier?.archived) throw new Error(`The supplier "${supplierName}" was removed. Restore it before importing.`);
         if (!supplier) {
           supplier = { id: createId("SUP"), name: supplierName, email: "", leadTimeDays: null, paymentTerms: "" };
           availableSuppliers.push(supplier);
@@ -915,13 +987,17 @@ export function InventoryProvider({ children }) {
       updatedItem = updateStockBalance(updatedItem, unit, Math.max(0, nextStock));
     });
     const purchaseSupplier = movement.movementType === "in" && updates.isPurchase
-      ? suppliers.find((supplier) => supplier.id === updates.supplierId)
+      ? suppliers.find((supplier) => supplier.id === updates.supplierId && (!supplier.archived || supplier.id === movement.supplierId))
       : null;
     const purchaseCost = Number(updates.unitCost);
     if (updates.isPurchase && movement.movementType === "in" && (!purchaseSupplier || String(updates.unitCost ?? "").trim() === "" || !Number.isFinite(purchaseCost) || purchaseCost < 0)) {
       throw new Error("Choose a supplier and enter a valid non-negative rate.");
     }
 
+    const updatedCategory = updates.category
+      ? categoriesByKey.get(categoryKey(updates.category))
+      : movement.category || item.category || "General Materials";
+    if (movement.movementType === "in" && !updatedCategory) throw new Error("Choose an existing category.");
     const updatedMovement = {
       ...movement,
       date: movementDate,
@@ -934,7 +1010,7 @@ export function InventoryProvider({ children }) {
       isPurchase: Boolean(purchaseSupplier),
       supplierId: purchaseSupplier?.id || "",
       supplier: purchaseSupplier?.name || "",
-      category: movement.category || item.category || "",
+      category: updatedCategory,
       unitCost: purchaseSupplier ? purchaseCost : null,
     };
     setItems((previous) => previous.map((entry) => (
@@ -957,7 +1033,7 @@ export function InventoryProvider({ children }) {
   };
 
   const createPurchaseOrder = (supplierId, lineItems, quotationId = null) => {
-    if (!suppliers.some((supplier) => supplier.id === supplierId)) {
+    if (!suppliers.some((supplier) => supplier.id === supplierId && !supplier.archived)) {
       throw new Error("Choose a valid supplier.");
     }
     if (!Array.isArray(lineItems) || !lineItems.length) {
@@ -1007,6 +1083,9 @@ export function InventoryProvider({ children }) {
   const splitPurchaseOrder = (purchaseOrderId, selectedLineIndexes) => {
     const existing = purchaseOrders.find((order) => order.id === purchaseOrderId);
     if (!existing) throw new Error("Purchase order was not found.");
+    if (!suppliers.some((supplier) => supplier.id === existing.supplierId && !supplier.archived)) {
+      throw new Error("Restore the supplier before creating a new purchase order.");
+    }
     if (existing.status !== "Pending") throw new Error("Only pending purchase orders can be split.");
     if (supplierInvoices.some((invoice) => invoice.purchaseOrderId === purchaseOrderId)) {
       throw new Error("Purchase orders linked to supplier invoices cannot be split.");
@@ -1083,10 +1162,20 @@ export function InventoryProvider({ children }) {
     });
   };
 
+  const getDeletionReceipts = (orders) => orders.flatMap((order) => {
+    if (order.status === "Received") return getPurchaseOrderReceipts(order);
+    const reference = order.orderNumber || order.id;
+    if (stockMovements.some((movement) => movement.purchaseOrderId === order.id
+      || (!movement.purchaseOrderId && movement.notes === "Purchase order receipt" && movement.reference === reference))) {
+      throw new Error("An unreceived purchase order has receipt records. Reconcile them before deletion.");
+    }
+    return [];
+  });
+
   const updatePurchaseOrder = (purchaseOrderId, supplierId, lineItems, date, invoiceUpdates) => {
     const existing = purchaseOrders.find((order) => order.id === purchaseOrderId);
     if (!existing) throw new Error("Purchase order was not found.");
-    const supplier = suppliers.find((entry) => entry.id === supplierId);
+    const supplier = suppliers.find((entry) => entry.id === supplierId && (!entry.archived || entry.id === existing.supplierId));
     if (!supplier) throw new Error("Choose a valid supplier.");
     if (!Array.isArray(lineItems) || !lineItems.length) throw new Error("Add at least one item to the purchase order.");
     const orderDate = String(date || "").trim();
@@ -1158,7 +1247,7 @@ export function InventoryProvider({ children }) {
         const movement = prepareStockMovement({
           ...line, movementType: "in", date: previous?.date || receiptDates[0],
           reference, notes: "Purchase order receipt", isPurchase: true, supplierId,
-        });
+        }, items, suppliers, existing.supplierId);
         return {
           ...movement,
           id: previous?.id || movement.id,
@@ -1192,15 +1281,7 @@ export function InventoryProvider({ children }) {
     if (!selectedIds.size || selectedOrders.length !== selectedIds.size) {
       throw new Error("One or more purchase orders could not be found.");
     }
-    const oldReceipts = selectedOrders.flatMap((order) => {
-      if (order.status === "Received") return getPurchaseOrderReceipts(order);
-      const reference = order.orderNumber || order.id;
-      if (stockMovements.some((movement) => movement.purchaseOrderId === order.id
-        || (!movement.purchaseOrderId && movement.notes === "Purchase order receipt" && movement.reference === reference))) {
-        throw new Error("An unreceived purchase order has receipt records. Reconcile them before deletion.");
-      }
-      return [];
-    });
+    const oldReceipts = getDeletionReceipts(selectedOrders);
     const updatedItems = reconcileReceiptStock(oldReceipts, []);
     const receiptIds = new Set(oldReceipts.map((movement) => movement.id));
     const quotationIds = new Set(selectedOrders.map((order) => order.quotationId).filter(Boolean));
@@ -1333,7 +1414,7 @@ export function InventoryProvider({ children }) {
   const createQuotation = ({ prId, supplierId, validUntil, lineItems }) => {
     const request = prId ? purchaseRequests.find((entry) => entry.id === prId) : null;
     if (prId && (!request || !["Approved", "Quoted"].includes(request.status))) throw new Error("Only approved purchase requests can receive quotations.");
-    if (!suppliers.some((supplier) => supplier.id === supplierId)) throw new Error("Choose a valid supplier.");
+    if (!suppliers.some((supplier) => supplier.id === supplierId && !supplier.archived)) throw new Error("Choose a valid supplier.");
     if (!validUntil || !Number.isFinite(Date.parse(validUntil))) throw new Error("Enter a valid quotation expiry date.");
     if (!Array.isArray(lineItems) || !lineItems.length || (request && lineItems.length !== request.lineItems.length)) {
       throw new Error("Add a quotation price for every item.");
@@ -1381,7 +1462,7 @@ export function InventoryProvider({ children }) {
     if (quotation.prId && (!request || !["Approved", "Quoted"].includes(request.status))) {
       throw new Error("Only quotations linked to approved purchase requests can be edited.");
     }
-    if (!suppliers.some((supplier) => supplier.id === updates.supplierId)) throw new Error("Choose a valid supplier.");
+    if (!suppliers.some((supplier) => supplier.id === updates.supplierId && (!supplier.archived || supplier.id === quotation.supplierId))) throw new Error("Choose a valid supplier.");
     if (!updates.validUntil || !Number.isFinite(Date.parse(updates.validUntil))) throw new Error("Enter a valid quotation expiry date.");
     if (!Array.isArray(updates.lineItems) || !updates.lineItems.length || (request && updates.lineItems.length !== request.lineItems.length)) {
       throw new Error("Add a quotation price for every item.");
@@ -1529,10 +1610,12 @@ export function InventoryProvider({ children }) {
     inventoryCategories,
     addInventoryCategory,
     renameInventoryCategory,
+    deleteInventoryCategory,
     setStockMovementCategory,
     addSupplier,
     updateSupplier,
     deleteSuppliers,
+    restoreSupplier,
     addSupplierInvoice,
     recordSupplierPayment,
     addItem,
@@ -1543,6 +1626,7 @@ export function InventoryProvider({ children }) {
     addInventoryTransaction,
     importInventoryTransactions,
     recordStockMovement,
+    addItemWithReceipt,
     recordPurchasedStockBatch,
     deleteStockMovements,
     updateStockMovement,

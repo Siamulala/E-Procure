@@ -70,6 +70,7 @@ export default function AlwenOperations({ user, initialTab = "requests" }) {
   const [supplierForm, setSupplierForm] = useState({ name: "", phone: "", email: "" });
   const [staffForm, setStaffForm] = useState({ name: "", phone: "" });
   const [itemForm, setItemForm] = useState({ name: "", sku: "", category_id: "", unit_id: "", reorder_level: "0" });
+  const [stockItemFormOpen, setStockItemFormOpen] = useState(false);
   const [receiptForm, setReceiptForm] = useState({
     purchase_order_id: "",
     purchase_order_line_id: "",
@@ -375,6 +376,21 @@ export default function AlwenOperations({ user, initialTab = "requests" }) {
 
   if (loading) return <div className="page-shell"><p>Loading Alwen operations...</p></div>;
 
+  const itemFormSection = (
+    <section className="page-card">
+      <h2 className="panel-title">Add item</h2>
+      <p className="panel-copy">New items start with zero stock. Record a receipt or adjustment to add stock.</p>
+      <form onSubmit={createItem} className="form-row" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", marginTop: 12 }}>
+        <Field label="Item name"><input className="input-field" value={itemForm.name} onChange={(event) => setItemForm((current) => ({ ...current, name: event.target.value }))} required /></Field>
+        <Field label="SKU"><input className="input-field" value={itemForm.sku} onChange={(event) => setItemForm((current) => ({ ...current, sku: event.target.value }))} /></Field>
+        <Field label="Category"><select className="input-field" value={itemForm.category_id} onChange={(event) => setItemForm((current) => ({ ...current, category_id: event.target.value }))}><option value="">Select category</option>{categories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}</select></Field>
+        <Field label="Unit"><select className="input-field" value={itemForm.unit_id} onChange={(event) => setItemForm((current) => ({ ...current, unit_id: event.target.value }))} required><option value="">Select unit</option>{units.map((unit) => <option key={unit.id} value={unit.id}>{unit.code}</option>)}</select></Field>
+        <Field label="Reorder level"><input className="input-field" type="number" min="0" step="0.001" value={itemForm.reorder_level} onChange={(event) => setItemForm((current) => ({ ...current, reorder_level: event.target.value }))} /></Field>
+        <button className="primary-btn" type="submit" disabled={saving}>Save item</button>
+      </form>
+    </section>
+  );
+
   return (
     <div className="page-shell">
       <div className="page-header">
@@ -418,19 +434,7 @@ export default function AlwenOperations({ user, initialTab = "requests" }) {
               </form>
             </section>
           ) : null}
-          {canWritePR ? (
-            <section className="page-card">
-              <h2 className="panel-title">Add item</h2>
-              <form onSubmit={createItem} className="form-row" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", marginTop: 12 }}>
-                <Field label="Item name"><input className="input-field" value={itemForm.name} onChange={(event) => setItemForm((current) => ({ ...current, name: event.target.value }))} required /></Field>
-                <Field label="SKU"><input className="input-field" value={itemForm.sku} onChange={(event) => setItemForm((current) => ({ ...current, sku: event.target.value }))} /></Field>
-                <Field label="Category"><select className="input-field" value={itemForm.category_id} onChange={(event) => setItemForm((current) => ({ ...current, category_id: event.target.value }))}><option value="">Select category</option>{categories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}</select></Field>
-                <Field label="Unit"><select className="input-field" value={itemForm.unit_id} onChange={(event) => setItemForm((current) => ({ ...current, unit_id: event.target.value }))} required><option value="">Select unit</option>{units.map((unit) => <option key={unit.id} value={unit.id}>{unit.code}</option>)}</select></Field>
-                <Field label="Reorder level"><input className="input-field" type="number" min="0" step="0.001" value={itemForm.reorder_level} onChange={(event) => setItemForm((current) => ({ ...current, reorder_level: event.target.value }))} /></Field>
-                <button className="primary-btn" type="submit" disabled={saving}>Save item</button>
-              </form>
-            </section>
-          ) : null}
+          {canWritePR ? itemFormSection : null}
           <section className="page-card" style={{ overflowX: "auto" }}>
             <h2 className="panel-title">Items & suppliers</h2>
             <p className="panel-copy">{items.length} items · {suppliers.length} suppliers</p>
@@ -648,6 +652,10 @@ export default function AlwenOperations({ user, initialTab = "requests" }) {
 
       {tab === "stock" ? (
         <>
+          {canWritePR ? <div className="no-print">
+            <button type="button" className="primary-btn" onClick={() => setStockItemFormOpen((open) => !open)}>{stockItemFormOpen ? "Close add item" : "Add item"}</button>
+            {stockItemFormOpen ? itemFormSection : null}
+          </div> : null}
           <section className="page-card" style={{ marginBottom: 16 }}>
             <h2 className="panel-title">Stock movement</h2>
             <div className="form-row" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", marginBottom: 12 }}>
